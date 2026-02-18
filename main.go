@@ -5,11 +5,13 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/qyinm/phtui/scraper"
 	"github.com/qyinm/phtui/ui"
 )
 
 func main() {
-	m := ui.NewModel(nil) // nil source = placeholder mode for now
+	source := scraper.New()
+	m := ui.NewModel(source)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
