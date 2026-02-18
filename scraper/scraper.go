@@ -40,22 +40,19 @@ func New() *Scraper {
 	}
 }
 
-// GetLeaderboard fetches and parses the Product Hunt leaderboard for the given period and date.
+// GetLeaderboard fetches and parses the Product Hunt Featured leaderboard for the given period and date.
 func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.Product, error) {
 	url := baseURL + period.URLPath(date)
 
-	// Check cache
 	s.mu.Lock()
 	if cached, ok := s.cache[url]; ok {
 		s.mu.Unlock()
-		products, ok := cached.value.([]types.Product)
-		if ok {
+		if products, ok := cached.value.([]types.Product); ok {
 			return products, nil
 		}
 	}
 	s.mu.Unlock()
 
-	// HTTP GET
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -72,17 +69,14 @@ func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.P
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	// Parse
 	products, err := ParseLeaderboard(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse leaderboard: %w", err)
 	}
 
-	// Cache result
 	s.mu.Lock()
 	s.cache[url] = cachedResult{value: products, timestamp: time.Now()}
 	s.mu.Unlock()
-
 	return products, nil
 }
 

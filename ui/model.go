@@ -28,6 +28,8 @@ const (
 type Model struct {
 	source    types.ProductSource
 	list      list.Model
+	products  []types.Product
+	selected  int
 	viewport  viewport.Model
 	spinner   spinner.Model
 	help      help.Model
@@ -46,12 +48,7 @@ type Model struct {
 
 // NewModel creates a new Model with the given ProductSource
 func NewModel(source types.ProductSource) Model {
-	l := list.New([]list.Item{}, NewProductDelegate(), 0, 0)
-	l.Title = "🔥 Daily"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.Styles.Title = TitleStyle
+	l := newProductListModel(nil, 80, 20)
 
 	vp := viewport.New(0, 0)
 
@@ -70,6 +67,8 @@ func NewModel(source types.ProductSource) Model {
 	return Model{
 		source:    source,
 		list:      l,
+		products:  nil,
+		selected:  0,
 		viewport:  vp,
 		spinner:   s,
 		help:      h,
@@ -81,6 +80,24 @@ func NewModel(source types.ProductSource) Model {
 		requestID: 1,
 		statusMsg: "Ready",
 	}
+}
+
+func newProductListModel(items []list.Item, width, height int) list.Model {
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 20
+	}
+
+	l := list.New(items, NewProductDelegate(), width, height)
+	l.SetShowTitle(false)
+	l.SetShowPagination(false)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.Styles.Title = TitleStyle
+	return l
 }
 
 // Init starts the initial leaderboard fetch
@@ -109,14 +126,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, p := range msg.products {
 			items[i] = p
 		}
-		m.list.SetItems(items)
+		m.products = msg.products
+		m.selected = 0
+		listHeight := m.height - 3
+		if listHeight < 1 {
+			listHeight = 1
+		}
+		m.list = newProductListModel(items, m.width, listHeight)
+		m.list.Paginator.Page = 0
+		m.list.Select(0)
 		m.list.ResetSelected()
-		m.list.Title = fmt.Sprintf("🔥 %s — %s", m.periodDisplayName(), m.formatDate())
 		m.err = nil
 		if len(msg.products) == 0 {
 			m.statusMsg = "No products found for this period"
 		} else {
-			m.statusMsg = fmt.Sprintf("Loaded %d products", len(msg.products))
+			firstRank := msg.products[0].Rank()
+			lastRank := msg.products[len(msg.products)-1].Rank()
+			selectedRank := firstRank
+			if p, ok := m.selectedProduct(); ok {
+				selectedRank = p.Rank()
+			}
+			m.statusMsg = fmt.Sprintf("Loaded %d products (ranks %d-%d, selected #%d)", len(msg.products), firstRank, lastRank, selectedRank)
 		}
 		return m, nil
 
@@ -277,10 +307,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var url string
 			switch m.state {
 			case ListView:
-				if item := m.list.SelectedItem(); item != nil {
-					if p, ok := item.(types.Product); ok && p.Slug() != "" {
-						url = "https://www.producthunt.com/products/" + p.Slug()
-					}
+				if p, ok := m.selectedProduct(); ok && p.Slug() != "" {
+					url = "https://www.producthunt.com/products/" + p.Slug()
 				}
 			case DetailView:
 				if m.detail.Product().Slug() != "" {
@@ -296,11 +324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case ListView:
 			if key.Matches(msg, m.keys.Enter) {
-				item := m.list.SelectedItem()
-				if item == nil {
-					return m, nil
-				}
-				p, ok := item.(types.Product)
+				p, ok := m.selectedProduct()
 				if !ok || p.Slug() == "" {
 					return m, nil
 				}
@@ -312,14 +336,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.requestID++
 				return m, tea.Batch(m.spinner.Tick, fetchProductDetail(m.source, p.Slug(), m.requestID))
 			}
-			var cmd tea.Cmd
-			m.list, cmd = m.list.Update(msg)
-			return m, cmd
+			if key.Matches(msg, m.keys.Up) {
+				if m.selected > 0 {
+					m.selected--
+				}
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Down) {
+				if m.selected < len(m.products)-1 {
+					m.selected++
+				}
+				return m, nil
+			}
+			return m, nil
 
 		case DetailView:
 			if key.Matches(msg, m.keys.Back) {
 				m.state = ListView
-				m.statusMsg = fmt.Sprintf("%d products", len(m.list.Items()))
+				m.statusMsg = fmt.Sprintf("%d products", len(m.products))
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -366,7 +400,7 @@ func (m Model) View() string {
 	} else {
 		switch m.state {
 		case ListView:
-			if len(m.list.Items()) == 0 {
+			if len(m.products) == 0 {
 				available := m.height - 3 // tab + status + help
 				if available < 1 {
 					available = 1
@@ -374,7 +408,7 @@ func (m Model) View() string {
 				msg := lipgloss.NewStyle().Foreground(DraculaComment).Render("No products found for this period")
 				sections = append(sections, lipgloss.Place(m.width, available, lipgloss.Center, lipgloss.Center, msg))
 			} else {
-				sections = append(sections, m.list.View())
+				sections = append(sections, m.renderProductList())
 			}
 		case DetailView:
 			sections = append(sections, m.viewport.View())
@@ -444,6 +478,114 @@ func (m Model) periodDisplayName() string {
 	default:
 		return "Daily"
 	}
+}
+
+func (m Model) selectedProduct() (types.Product, bool) {
+	if len(m.products) == 0 {
+		return types.Product{}, false
+	}
+	if m.selected < 0 || m.selected >= len(m.products) {
+		return types.Product{}, false
+	}
+	return m.products[m.selected], true
+}
+
+func (m Model) renderProductList() string {
+	available := m.height - 3 // tab + status + help
+	if available < 1 {
+		available = 1
+	}
+
+	itemHeight := 3
+	visibleCount := available / itemHeight
+	if visibleCount < 1 {
+		visibleCount = 1
+	}
+
+	start := 0
+	if m.selected >= visibleCount {
+		start = m.selected - visibleCount + 1
+	}
+	end := start + visibleCount
+	if end > len(m.products) {
+		end = len(m.products)
+		start = end - visibleCount
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		b.WriteString(renderProductItem(m.products[i], i == m.selected, m.width))
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func renderProductItem(product types.Product, isSelected bool, width int) string {
+	// Line 1
+	rankStr := fmt.Sprintf("#%-2d", product.Rank())
+	nameStr := product.Name()
+	voteDisplay := fmt.Sprintf("▲ %s", formatVoteCount(product.VoteCount()))
+
+	rankWidth := 4
+	voteWidth := len(voteDisplay) + 1
+	availableForName := width - rankWidth - voteWidth
+	if availableForName <= 1 {
+		availableForName = 0
+	}
+	if availableForName > 0 && len(nameStr) > availableForName {
+		nameStr = nameStr[:availableForName-1] + "…"
+	} else if availableForName > len(nameStr) {
+		nameStr = nameStr + strings.Repeat(" ", availableForName-len(nameStr))
+	}
+
+	var line1 string
+	if isSelected {
+		rankStyle := lipgloss.NewStyle().Foreground(DraculaCyan).Bold(true)
+		nameStyle := lipgloss.NewStyle().Foreground(DraculaPink).Bold(true)
+		voteStyle := lipgloss.NewStyle().Foreground(DraculaGreen).Bold(true)
+		line1 = lipgloss.JoinHorizontal(lipgloss.Left, rankStyle.Render(rankStr), nameStyle.Render(nameStr), voteStyle.Render(voteDisplay))
+	} else {
+		rankStyle := lipgloss.NewStyle().Foreground(DraculaComment)
+		nameStyle := lipgloss.NewStyle().Foreground(DraculaCyan)
+		voteStyle := lipgloss.NewStyle().Foreground(DraculaGreen)
+		line1 = lipgloss.JoinHorizontal(lipgloss.Left, rankStyle.Render(rankStr), nameStyle.Render(nameStr), voteStyle.Render(voteDisplay))
+	}
+
+	// Line 2
+	tagline := product.Tagline()
+	taglineIndent := "    "
+	taglineAvailable := width - len(taglineIndent)
+	if taglineAvailable < 0 {
+		taglineAvailable = 0
+	}
+	if len(tagline) > taglineAvailable {
+		tagline = tagline[:taglineAvailable-3] + "…"
+	}
+	line2 := taglineIndent + lipgloss.NewStyle().Foreground(DraculaForeground).Render(tagline)
+
+	// Line 3
+	categoryStr := strings.Join(product.Categories(), " • ")
+	categoryIndent := "    "
+	categoryAvailable := width - len(categoryIndent)
+	if categoryAvailable < 0 {
+		categoryAvailable = 0
+	}
+	if len(categoryStr) > categoryAvailable {
+		categoryStr = categoryStr[:categoryAvailable-3] + "…"
+	}
+	line3 := categoryIndent + lipgloss.NewStyle().Foreground(DraculaComment).Render(categoryStr)
+
+	output := line1 + "\n" + line2 + "\n" + line3
+	if isSelected {
+		return SelectedItemStyle.Render(output)
+	}
+	return output
 }
 
 // renderDetailContent formats ProductDetail for the viewport
