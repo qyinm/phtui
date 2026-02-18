@@ -41,12 +41,13 @@ type Model struct {
 	err       error
 	statusMsg string
 	detail    types.ProductDetail
+	requestID int
 }
 
 // NewModel creates a new Model with the given ProductSource
 func NewModel(source types.ProductSource) Model {
-	l := list.New([]list.Item{}, ProductDelegate{}, 0, 0)
-	l.Title = ""
+	l := list.New([]list.Item{}, NewProductDelegate(), 0, 0)
+	l.Title = "🔥 Daily"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
@@ -77,6 +78,7 @@ func NewModel(source types.ProductSource) Model {
 		period:    types.Daily,
 		date:      time.Now(),
 		loading:   source != nil,
+		requestID: 1,
 		statusMsg: "Ready",
 	}
 }
@@ -86,7 +88,7 @@ func (m Model) Init() tea.Cmd {
 	if m.source == nil {
 		return nil
 	}
-	return tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+	return tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 }
 
 // Update handles all messages
@@ -94,10 +96,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case leaderboardMsg:
+		if msg.requestID != m.requestID {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.statusMsg = msg.err.Error()
+			m.statusMsg = "Failed to fetch: " + msg.err.Error()
 			return m, nil
 		}
 		items := make([]list.Item, len(msg.products))
@@ -105,6 +110,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items[i] = p
 		}
 		m.list.SetItems(items)
+		m.list.ResetSelected()
+		m.list.Title = fmt.Sprintf("🔥 %s — %s", m.periodDisplayName(), m.formatDate())
 		m.err = nil
 		if len(msg.products) == 0 {
 			m.statusMsg = "No products found for this period"
@@ -114,10 +121,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case productDetailMsg:
+		if msg.requestID != m.requestID {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.statusMsg = msg.err.Error()
+			m.statusMsg = "Failed to fetch: " + msg.err.Error()
 			return m, nil
 		}
 		m.detail = msg.detail
@@ -167,7 +177,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Daily):
 			if m.period == types.Daily {
@@ -180,7 +191,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Weekly):
 			if m.period == types.Weekly {
@@ -193,7 +205,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Monthly):
 			if m.period == types.Monthly {
@@ -206,7 +219,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.PrevDate):
 			switch m.period {
@@ -223,7 +237,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.NextDate):
 			var next time.Time
@@ -245,19 +260,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Refresh):
-			if s, ok := m.source.(interface{ ClearCache() }); ok {
-				s.ClearCache()
-			}
 			m.state = ListView
 			m.loading = true
 			m.statusMsg = "Refreshing..."
 			if m.source == nil {
 				return m, nil
 			}
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date))
+			m.requestID++
+			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Open):
 			var url string
@@ -269,7 +283,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case DetailView:
-				url = m.detail.WebsiteURL()
+				if m.detail.Product().Slug() != "" {
+					url = "https://www.producthunt.com/products/" + m.detail.Product().Slug()
+				}
 			}
 			if url != "" {
 				_ = exec.Command("open", url).Start()
@@ -293,7 +309,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.loading = true
 				m.statusMsg = "Loading detail..."
-				return m, tea.Batch(m.spinner.Tick, fetchProductDetail(m.source, p.Slug()))
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchProductDetail(m.source, p.Slug(), m.requestID))
 			}
 			var cmd tea.Cmd
 			m.list, cmd = m.list.Update(msg)
@@ -327,10 +344,10 @@ func (m Model) View() string {
 	}
 
 	// Check if terminal is too small
-	if m.width < 40 || m.height < 10 {
+	if m.width < 60 || m.height < 15 {
 		return lipgloss.NewStyle().
 			Foreground(DraculaOrange).
-			Render("Terminal too small. Please resize to at least 40x10.")
+			Render("Terminal too small. Resize to at least 60x15.")
 	}
 
 	var sections []string
@@ -416,6 +433,19 @@ func (m Model) formatDate() string {
 	}
 }
 
+func (m Model) periodDisplayName() string {
+	switch m.period {
+	case types.Daily:
+		return "Daily"
+	case types.Weekly:
+		return "Weekly"
+	case types.Monthly:
+		return "Monthly"
+	default:
+		return "Daily"
+	}
+}
+
 // renderDetailContent formats ProductDetail for the viewport
 func (m Model) renderDetailContent() string {
 	d := m.detail
@@ -448,6 +478,21 @@ func (m Model) renderDetailContent() string {
 		b.WriteString("\n--- Maker Comment ---\n")
 		b.WriteString(d.MakerComment())
 		b.WriteString("\n")
+	}
+
+	if len(d.Categories()) > 0 {
+		b.WriteString("\nCategories: ")
+		b.WriteString(strings.Join(d.Categories(), " • "))
+		b.WriteString("\n")
+	}
+
+	if len(d.SocialLinks()) > 0 {
+		b.WriteString("\nSocial:\n")
+		for _, link := range d.SocialLinks() {
+			b.WriteString("- ")
+			b.WriteString(link)
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()

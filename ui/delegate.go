@@ -11,22 +11,31 @@ import (
 	"github.com/qyinm/phtui/types"
 )
 
-// ProductDelegate is a custom list delegate for rendering Product items
-type ProductDelegate struct{}
+type ProductDelegate struct {
+	base list.DefaultDelegate
+}
+
+func NewProductDelegate() ProductDelegate {
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetSpacing(0)
+	d.SetHeight(3)
+	return ProductDelegate{base: d}
+}
 
 // Height returns the height of a list item (3 lines)
 func (d ProductDelegate) Height() int {
-	return 3
+	return d.base.Height()
 }
 
 // Spacing returns the spacing between list items
 func (d ProductDelegate) Spacing() int {
-	return 0
+	return d.base.Spacing()
 }
 
 // Update handles updates for the delegate (no-op for products)
 func (d ProductDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
-	return nil
+	return d.base.Update(msg, m)
 }
 
 // Render renders a single product item
@@ -38,6 +47,11 @@ func (d ProductDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	// Determine if this item is selected
 	isSelected := index == m.Index()
+
+	lineStyle := lipgloss.NewStyle()
+	if isSelected {
+		lineStyle = SelectedItemStyle
+	}
 
 	// Line 1: Rank + Name + Vote Count
 	rankStr := fmt.Sprintf("#%-2d", product.Rank())
@@ -53,14 +67,14 @@ func (d ProductDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	voteWidth := len(voteDisplay) + 1 // " ▲ 1,422"
 	availableForName := m.Width() - rankWidth - voteWidth
 
-	if availableForName < 0 {
+	if availableForName <= 1 {
 		availableForName = 0
 	}
 
 	// Truncate or pad name
-	if len(nameStr) > availableForName {
+	if availableForName > 0 && len(nameStr) > availableForName {
 		nameStr = nameStr[:availableForName-1] + "…"
-	} else {
+	} else if availableForName > len(nameStr) {
 		nameStr = nameStr + strings.Repeat(" ", availableForName-len(nameStr))
 	}
 
@@ -70,12 +84,22 @@ func (d ProductDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		rankStyle := lipgloss.NewStyle().Foreground(DraculaCyan).Bold(true)
 		nameStyle := lipgloss.NewStyle().Foreground(DraculaPink).Bold(true)
 		voteStyle := lipgloss.NewStyle().Foreground(DraculaGreen).Bold(true)
-		line1 = rankStyle.Render(rankStr) + nameStyle.Render(nameStr) + voteStyle.Render(voteDisplay)
+		line1 = lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			rankStyle.Render(rankStr),
+			nameStyle.Render(nameStr),
+			voteStyle.Render(voteDisplay),
+		)
 	} else {
 		rankStyle := lipgloss.NewStyle().Foreground(DraculaComment)
 		nameStyle := lipgloss.NewStyle().Foreground(DraculaCyan)
 		voteStyle := lipgloss.NewStyle().Foreground(DraculaGreen)
-		line1 = rankStyle.Render(rankStr) + nameStyle.Render(nameStr) + voteStyle.Render(voteDisplay)
+		line1 = lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			rankStyle.Render(rankStr),
+			nameStyle.Render(nameStr),
+			voteStyle.Render(voteDisplay),
+		)
 	}
 
 	// Line 2: Tagline (indented)
@@ -125,7 +149,7 @@ func (d ProductDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	// Combine lines and write to output
 	output := line1 + "\n" + line2 + "\n" + line3
-	fmt.Fprint(w, output)
+	fmt.Fprint(w, lineStyle.Render(output))
 }
 
 // formatVoteCount formats vote count with K/M suffixes

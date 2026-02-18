@@ -4,15 +4,15 @@ import "github.com/charmbracelet/lipgloss"
 
 // 16-color ANSI Dracula palette (identical to lazyadmin)
 var (
-	DraculaBackground = lipgloss.Color("0")
-	DraculaForeground = lipgloss.Color("255")
-	DraculaPurple     = lipgloss.Color("5")
-	DraculaPink       = lipgloss.Color("13")
-	DraculaCyan       = lipgloss.Color("14")
-	DraculaGreen      = lipgloss.Color("10")
-	DraculaComment    = lipgloss.Color("7")
-	DraculaOrange     = lipgloss.Color("3")
-	DraculaRed        = lipgloss.Color("1")
+	DraculaBackground = lipgloss.AdaptiveColor{Light: "0", Dark: "0"}
+	DraculaForeground = lipgloss.AdaptiveColor{Light: "255", Dark: "255"}
+	DraculaPurple     = lipgloss.AdaptiveColor{Light: "5", Dark: "5"}
+	DraculaPink       = lipgloss.AdaptiveColor{Light: "13", Dark: "13"}
+	DraculaCyan       = lipgloss.AdaptiveColor{Light: "14", Dark: "14"}
+	DraculaGreen      = lipgloss.AdaptiveColor{Light: "10", Dark: "10"}
+	DraculaComment    = lipgloss.AdaptiveColor{Light: "7", Dark: "7"}
+	DraculaOrange     = lipgloss.AdaptiveColor{Light: "3", Dark: "3"}
+	DraculaRed        = lipgloss.AdaptiveColor{Light: "1", Dark: "1"}
 
 	// Tab bar styles
 	ActiveTabStyle = lipgloss.NewStyle().
@@ -49,4 +49,10 @@ var (
 			Bold(true)
 	HelpDescStyle = lipgloss.NewStyle().
 			Foreground(DraculaForeground)
+
+	SelectedItemStyle = lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(DraculaPink).
+				PaddingLeft(1)
 )
