@@ -22,12 +22,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: "https://registry.npmjs.org"
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -36,11 +30,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-
-      - name: Publish to npm
-        run: |
-          ls -la dist
-          npx -y goreleaser-npm-publisher publish --prefix @qyinm --version ${GITHUB_REF_NAME#v}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
