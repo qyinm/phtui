@@ -39,8 +39,8 @@ type Model struct {
 
 // NewModel creates a new Model with the given ProductSource
 func NewModel(source types.ProductSource) Model {
-	// Create list with default delegate
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	// Create list with custom product delegate
+	l := list.New([]list.Item{}, ProductDelegate{}, 0, 0)
 	l.Title = "Product Hunt Leaderboard"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
