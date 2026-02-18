@@ -106,7 +106,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.list.SetItems(items)
 		m.err = nil
-		m.statusMsg = fmt.Sprintf("Loaded %d products", len(msg.products))
+		if len(msg.products) == 0 {
+			m.statusMsg = "No products found for this period"
+		} else {
+			m.statusMsg = fmt.Sprintf("Loaded %d products", len(msg.products))
+		}
 		return m, nil
 
 	case productDetailMsg:
@@ -322,6 +326,13 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
+	// Check if terminal is too small
+	if m.width < 40 || m.height < 10 {
+		return lipgloss.NewStyle().
+			Foreground(DraculaOrange).
+			Render("Terminal too small. Please resize to at least 40x10.")
+	}
+
 	var sections []string
 
 	if m.state == ListView || m.loading {
@@ -338,7 +349,16 @@ func (m Model) View() string {
 	} else {
 		switch m.state {
 		case ListView:
-			sections = append(sections, m.list.View())
+			if len(m.list.Items()) == 0 {
+				available := m.height - 3 // tab + status + help
+				if available < 1 {
+					available = 1
+				}
+				msg := lipgloss.NewStyle().Foreground(DraculaComment).Render("No products found for this period")
+				sections = append(sections, lipgloss.Place(m.width, available, lipgloss.Center, lipgloss.Center, msg))
+			} else {
+				sections = append(sections, m.list.View())
+			}
 		case DetailView:
 			sections = append(sections, m.viewport.View())
 		}
