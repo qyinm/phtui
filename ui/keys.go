@@ -38,7 +38,7 @@ var keys = keyMap{
 
 // ShortHelp returns short help key bindings (for help.Model)
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Enter, k.Back, k.Tab, k.PrevDate, k.Quit}
+	return []key.Binding{k.Up, k.Enter, k.Back, k.Tab, k.PrevDate, k.NextDate, k.Quit}
 }
 
 // FullHelp returns full help key bindings

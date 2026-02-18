@@ -55,4 +55,15 @@ var (
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderForeground(DraculaPink).
 				PaddingLeft(1)
+
+	// Date bar styles
+	DateArrowStyle = lipgloss.NewStyle().
+			Foreground(DraculaComment)
+	DateItemStyle = lipgloss.NewStyle().
+			Foreground(DraculaCyan)
+	DateItemActiveStyle = lipgloss.NewStyle().
+				Foreground(DraculaPink).
+				Bold(true)
+	DateItemDimStyle = lipgloss.NewStyle().
+				Foreground(DraculaComment)
 )

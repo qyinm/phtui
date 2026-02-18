@@ -24,26 +24,34 @@ const (
 	DetailView
 )
 
+// dateRegion represents a clickable region in the date bar.
+type dateRegion struct {
+	xStart, xEnd int
+	action       string    // "prev", "next", or "goto"
+	date         time.Time // target date when action is "goto"
+}
+
 // Model is the main TUI model
 type Model struct {
-	source    types.ProductSource
-	list      list.Model
-	products  []types.Product
-	selected  int
-	viewport  viewport.Model
-	spinner   spinner.Model
-	help      help.Model
-	keys      keyMap
-	state     ViewState
-	period    types.Period
-	date      time.Time
-	width     int
-	height    int
-	loading   bool
-	err       error
-	statusMsg string
-	detail    types.ProductDetail
-	requestID int
+	source         types.ProductSource
+	list           list.Model
+	products       []types.Product
+	selected       int
+	viewport       viewport.Model
+	spinner        spinner.Model
+	help           help.Model
+	keys           keyMap
+	state          ViewState
+	period         types.Period
+	date           time.Time
+	width          int
+	height         int
+	loading        bool
+	err            error
+	statusMsg      string
+	detail         types.ProductDetail
+	requestID      int
+	dateBarRegions []dateRegion
 }
 
 // NewModel creates a new Model with the given ProductSource
@@ -128,7 +136,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.products = msg.products
 		m.selected = 0
-		listHeight := m.height - 3
+		listHeight := m.height - 4
 		if listHeight < 1 {
 			listHeight = 1
 		}
@@ -361,6 +369,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+	case tea.MouseMsg:
+		if m.loading {
+			return m, nil
+		}
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
+			// Date bar is on row 1 (0-indexed: row 0 = tab bar, row 1 = date bar)
+			if m.state == ListView && msg.Y == 1 {
+				for _, r := range lastDateBarRegions {
+					if msg.X >= r.xStart && msg.X < r.xEnd {
+						return m.handleDateBarClick(r)
+					}
+				}
+			}
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -391,7 +415,7 @@ func (m Model) View() string {
 	}
 
 	if m.loading {
-		available := m.height - 3 // tab + status + help
+		available := m.height - 4 // tab + status + help
 		if available < 1 {
 			available = 1
 		}
@@ -401,7 +425,7 @@ func (m Model) View() string {
 		switch m.state {
 		case ListView:
 			if len(m.products) == 0 {
-				available := m.height - 3 // tab + status + help
+				available := m.height - 4 // tab + status + help
 				if available < 1 {
 					available = 1
 				}
@@ -426,8 +450,9 @@ func (m Model) View() string {
 	return strings.Join(sections, "\n")
 }
 
-// renderTabBar builds the period tab bar with date
+// renderTabBar builds the period tab bar (line 1) and date selector bar (line 2).
 func (m Model) renderTabBar() string {
+	// Line 1: period tabs
 	tabs := []struct {
 		label  string
 		period types.Period
@@ -445,11 +470,168 @@ func (m Model) renderTabBar() string {
 			parts = append(parts, InactiveTabStyle.Render(t.label))
 		}
 	}
+	line1 := strings.Join(parts, "")
 
-	sep := lipgloss.NewStyle().Foreground(DraculaComment).Render(" — ")
-	dateStr := lipgloss.NewStyle().Foreground(DraculaComment).Render(m.formatDate())
+	// Line 2: date selector bar
+	line2, regions := m.buildDateBar()
+	lastDateBarRegions = regions
 
-	return strings.Join(parts, "") + sep + dateStr
+	return line1 + "\n" + line2
+}
+
+// lastDateBarRegions stores click regions from the last render (single-threaded TUI).
+var lastDateBarRegions []dateRegion
+
+// buildDateBar builds the date selector bar and returns the rendered string and click regions.
+func (m Model) buildDateBar() (string, []dateRegion) {
+	switch m.period {
+	case types.Daily:
+		return m.buildDailyDateBar()
+	case types.Weekly:
+		return m.buildWeeklyDateBar()
+	case types.Monthly:
+		return m.buildMonthlyDateBar()
+	default:
+		return m.buildDailyDateBar()
+	}
+}
+
+func (m Model) buildDailyDateBar() (string, []dateRegion) {
+	var regions []dateRegion
+	var b strings.Builder
+	x := 0
+
+	// Left arrow — navigates to previous month
+	arrow := "◀ "
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw := lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "prev_month"})
+	x += aw
+
+	year, month, _ := m.date.Date()
+	loc := m.date.Location()
+	daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+	today := time.Now()
+	currentDay := m.date.Day()
+
+	for d := 1; d <= daysInMonth; d++ {
+		label := fmt.Sprintf("%d", d)
+		padded := " " + label + " "
+		targetDate := time.Date(year, month, d, 0, 0, 0, 0, loc)
+		isFuture := targetDate.After(today)
+
+		var styled string
+		if d == currentDay {
+			styled = DateItemActiveStyle.Render(padded)
+		} else if isFuture {
+			styled = DateItemDimStyle.Render(padded)
+		} else {
+			styled = DateItemStyle.Render(padded)
+		}
+		b.WriteString(styled)
+
+		cellWidth := lipgloss.Width(padded)
+		if !isFuture {
+			regions = append(regions, dateRegion{xStart: x, xEnd: x + cellWidth, action: "goto", date: targetDate})
+		}
+		x += cellWidth
+	}
+
+	// Right arrow — navigates to next month
+	arrow = " ▶"
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw = lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "next_month"})
+
+	return b.String(), regions
+}
+
+func (m Model) buildWeeklyDateBar() (string, []dateRegion) {
+	var regions []dateRegion
+	var b strings.Builder
+	x := 0
+
+	arrow := "◀ "
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw := lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "prev_month"})
+	x += aw
+
+	year, month, _ := m.date.Date()
+	loc := m.date.Location()
+	_, currentWeek := m.date.ISOWeek()
+
+	// Find weeks that overlap with this month
+	firstOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, loc)
+	lastOfMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, loc)
+
+	// Start from the Monday of the week containing the first of the month
+	weekStart := firstOfMonth
+	for weekStart.Weekday() != time.Monday {
+		weekStart = weekStart.AddDate(0, 0, -1)
+	}
+
+	today := time.Now()
+	for ws := weekStart; !ws.After(lastOfMonth); ws = ws.AddDate(0, 0, 7) {
+		we := ws.AddDate(0, 0, 6) // week end (Sunday)
+		_, thisWeek := ws.ISOWeek()
+
+		// Format: "M/D-D" or "M/D-M/D" if crossing month boundary
+		var label string
+		if ws.Month() == we.Month() {
+			label = fmt.Sprintf("%d/%d-%d", int(ws.Month()), ws.Day(), we.Day())
+		} else {
+			label = fmt.Sprintf("%d/%d-%d/%d", int(ws.Month()), ws.Day(), int(we.Month()), we.Day())
+		}
+		padded := " " + label + " "
+
+		isFuture := ws.After(today)
+		var styled string
+		if thisWeek == currentWeek {
+			styled = DateItemActiveStyle.Render(padded)
+		} else if isFuture {
+			styled = DateItemDimStyle.Render(padded)
+		} else {
+			styled = DateItemStyle.Render(padded)
+		}
+		b.WriteString(styled)
+
+		cellWidth := lipgloss.Width(padded)
+		if !isFuture {
+			regions = append(regions, dateRegion{xStart: x, xEnd: x + cellWidth, action: "goto", date: ws})
+		}
+		x += cellWidth
+	}
+
+	arrow = " ▶"
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw = lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "next_month"})
+
+	return b.String(), regions
+}
+
+func (m Model) buildMonthlyDateBar() (string, []dateRegion) {
+	var regions []dateRegion
+	var b strings.Builder
+	x := 0
+
+	arrow := "◀ "
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw := lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "prev_month"})
+	x += aw
+
+	label := " " + m.date.Format("January 2006") + " "
+	b.WriteString(DateItemActiveStyle.Render(label))
+	x += lipgloss.Width(label)
+
+	arrow = " ▶"
+	b.WriteString(DateArrowStyle.Render(arrow))
+	aw = lipgloss.Width(arrow)
+	regions = append(regions, dateRegion{xStart: x, xEnd: x + aw, action: "next_month"})
+
+	return b.String(), regions
 }
 
 // formatDate returns the date formatted for the current period
@@ -480,6 +662,52 @@ func (m Model) periodDisplayName() string {
 	}
 }
 
+func (m Model) handleDateBarClick(r dateRegion) (tea.Model, tea.Cmd) {
+	switch r.action {
+	case "prev_month":
+		switch m.period {
+		case types.Daily:
+			// Go to previous month, keep same day if possible
+			prev := m.date.AddDate(0, -1, 0)
+			m.date = prev
+		case types.Weekly:
+			m.date = m.date.AddDate(0, -1, 0)
+		case types.Monthly:
+			m.date = m.date.AddDate(0, -1, 0)
+		}
+	case "next_month":
+		var next time.Time
+		switch m.period {
+		case types.Daily:
+			next = m.date.AddDate(0, 1, 0)
+		case types.Weekly:
+			next = m.date.AddDate(0, 1, 0)
+		case types.Monthly:
+			next = m.date.AddDate(0, 1, 0)
+		}
+		if next.After(time.Now()) {
+			return m, nil
+		}
+		m.date = next
+	case "goto":
+		if r.date.After(time.Now()) {
+			return m, nil
+		}
+		m.date = r.date
+	default:
+		return m, nil
+	}
+
+	m.state = ListView
+	m.loading = true
+	m.statusMsg = "Loading..."
+	if m.source == nil {
+		return m, nil
+	}
+	m.requestID++
+	return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+}
+
 func (m Model) selectedProduct() (types.Product, bool) {
 	if len(m.products) == 0 {
 		return types.Product{}, false
@@ -491,7 +719,7 @@ func (m Model) selectedProduct() (types.Product, bool) {
 }
 
 func (m Model) renderProductList() string {
-	available := m.height - 3 // tab + status + help
+	available := m.height - 4 // tab + status + help
 	if available < 1 {
 		available = 1
 	}
@@ -646,8 +874,8 @@ func (m *Model) resizePanes() {
 		return
 	}
 
-	// Chrome: tab bar (1) + status bar (1) + help (1) = 3
-	chrome := 3
+	// Chrome: tab bar (1) + date bar (1) + status bar (1) + help (1) = 4
+	chrome := 4
 	listHeight := m.height - chrome
 	if listHeight < 0 {
 		listHeight = 0
