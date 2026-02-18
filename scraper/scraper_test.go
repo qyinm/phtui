@@ -24,7 +24,7 @@ func TestURLConstruction(t *testing.T) {
 			name:     "Weekly 2025-02-18",
 			period:   types.Weekly,
 			date:     time.Date(2025, 2, 18, 0, 0, 0, 0, time.UTC),
-			expected: "https://www.producthunt.com/leaderboard/weekly/2025/7",
+			expected: "https://www.producthunt.com/leaderboard/weekly/2025/8",
 		},
 		{
 			name:     "Monthly 2025-02-18",
