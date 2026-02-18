@@ -16,11 +16,19 @@ Product Hunt TUI - browse the Product Hunt leaderboard from your terminal.
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install qyinm/tap/phtui
+```
+
+### Go
+
 ```bash
 go install github.com/qyinm/phtui@latest
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/qyinm/phtui.git
