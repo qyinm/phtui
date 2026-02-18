@@ -38,7 +38,9 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Publish to npm
-        run: npx -y goreleaser-npm-publisher publish --prefix @qyinm --clear --version ${GITHUB_REF_NAME#v} --token $NODE_AUTH_TOKEN
+        run: |
+          ls -la dist
+          npx -y goreleaser-npm-publisher publish --prefix @qyinm --version ${GITHUB_REF_NAME#v}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
