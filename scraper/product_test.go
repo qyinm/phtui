@@ -67,6 +67,39 @@ func TestParseProductDetail(t *testing.T) {
 	if got := detail.WebsiteURL(); !strings.Contains(got, "tanka.ai") {
 		t.Errorf("WebsiteURL = %q, expected to contain 'tanka.ai'", got)
 	}
+
+	if detail.Categories() == nil {
+		t.Error("Categories should not be nil")
+	}
+	if len(detail.SocialLinks()) == 0 {
+		t.Error("SocialLinks is empty")
+	}
+}
+
+func TestParseProductDetailMetadataExtraction(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><link rel="canonical" href="https://www.producthunt.com/products/demo"></head><body>
+	<div data-test="header">
+	  <h1>Demo</h1>
+	  <h2 class="text-18">Demo tagline</h2>
+	  <a data-test="visit-website-button" href="https://demo.example.com">Visit</a>
+	</div>
+	<a href="/topics/productivity">Productivity</a>
+	<a href="/topics/ai">AI</a>
+	<a href="https://x.com/demo">X</a>
+	<a href="https://linkedin.com/company/demo">LinkedIn</a>
+	</body></html>`
+
+	detail, err := ParseProductDetail(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("ParseProductDetail: %v", err)
+	}
+
+	if len(detail.Categories()) != 2 {
+		t.Errorf("Categories length = %d, want 2", len(detail.Categories()))
+	}
+	if len(detail.SocialLinks()) != 2 {
+		t.Errorf("SocialLinks length = %d, want 2", len(detail.SocialLinks()))
+	}
 }
 
 func TestParseProductDetailContent(t *testing.T) {
@@ -138,5 +171,11 @@ func TestParseProductDetailMinimalHTML(t *testing.T) {
 	}
 	if got := detail.MakerComment(); got != "" {
 		t.Errorf("MakerComment = %q, want empty", got)
+	}
+	if len(detail.Categories()) != 0 {
+		t.Errorf("Categories length = %d, want 0", len(detail.Categories()))
+	}
+	if len(detail.SocialLinks()) != 0 {
+		t.Errorf("SocialLinks length = %d, want 0", len(detail.SocialLinks()))
 	}
 }

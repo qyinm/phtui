@@ -12,14 +12,19 @@ import (
 
 const (
 	baseURL   = "https://www.producthunt.com"
-	userAgent = "phtui/1.0"
+	userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 // Scraper implements types.ProductSource using HTTP client and in-memory cache.
 type Scraper struct {
 	client *http.Client
-	cache  map[string]any
+	cache  map[string]cachedResult
 	mu     sync.Mutex
+}
+
+type cachedResult struct {
+	value     any
+	timestamp time.Time
 }
 
 // Compile-time interface check
@@ -31,7 +36,7 @@ func New() *Scraper {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		cache: make(map[string]any),
+		cache: make(map[string]cachedResult),
 	}
 }
 
@@ -43,7 +48,10 @@ func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.P
 	s.mu.Lock()
 	if cached, ok := s.cache[url]; ok {
 		s.mu.Unlock()
-		return cached.([]types.Product), nil
+		products, ok := cached.value.([]types.Product)
+		if ok {
+			return products, nil
+		}
 	}
 	s.mu.Unlock()
 
@@ -72,7 +80,7 @@ func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.P
 
 	// Cache result
 	s.mu.Lock()
-	s.cache[url] = products
+	s.cache[url] = cachedResult{value: products, timestamp: time.Now()}
 	s.mu.Unlock()
 
 	return products, nil
@@ -86,7 +94,10 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 	s.mu.Lock()
 	if cached, ok := s.cache[url]; ok {
 		s.mu.Unlock()
-		return cached.(types.ProductDetail), nil
+		detail, ok := cached.value.(types.ProductDetail)
+		if ok {
+			return detail, nil
+		}
 	}
 	s.mu.Unlock()
 
@@ -117,7 +128,7 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 
 	// Cache result
 	s.mu.Lock()
-	s.cache[url] = detail
+	s.cache[url] = cachedResult{value: detail, timestamp: time.Now()}
 	s.mu.Unlock()
 
 	return detail, nil
@@ -127,5 +138,5 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 func (s *Scraper) ClearCache() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cache = make(map[string]any)
+	s.cache = make(map[string]cachedResult)
 }

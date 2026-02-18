@@ -105,10 +105,12 @@ type ProductDetail struct {
 	followerCount int
 	makerComment  string
 	websiteURL    string
+	categories    []string
+	socialLinks   []string
 }
 
 // NewProductDetail creates a new ProductDetail
-func NewProductDetail(product Product, description string, rating float64, reviewCount, followerCount int, makerComment, websiteURL string) ProductDetail {
+func NewProductDetail(product Product, description string, rating float64, reviewCount, followerCount int, makerComment, websiteURL string, categories, socialLinks []string) ProductDetail {
 	return ProductDetail{
 		product:       product,
 		description:   description,
@@ -117,17 +119,23 @@ func NewProductDetail(product Product, description string, rating float64, revie
 		followerCount: followerCount,
 		makerComment:  makerComment,
 		websiteURL:    websiteURL,
+		categories:    categories,
+		socialLinks:   socialLinks,
 	}
 }
 
 // Getters for ProductDetail fields
-func (pd ProductDetail) Product() Product     { return pd.product }
-func (pd ProductDetail) Description() string  { return pd.description }
-func (pd ProductDetail) Rating() float64      { return pd.rating }
-func (pd ProductDetail) ReviewCount() int     { return pd.reviewCount }
-func (pd ProductDetail) FollowerCount() int   { return pd.followerCount }
-func (pd ProductDetail) MakerComment() string { return pd.makerComment }
-func (pd ProductDetail) WebsiteURL() string   { return pd.websiteURL }
+func (pd ProductDetail) Product() Product      { return pd.product }
+func (pd ProductDetail) Description() string   { return pd.description }
+func (pd ProductDetail) Rating() float64       { return pd.rating }
+func (pd ProductDetail) ReviewCount() int      { return pd.reviewCount }
+func (pd ProductDetail) FollowerCount() int    { return pd.followerCount }
+func (pd ProductDetail) MakerComment() string  { return pd.makerComment }
+func (pd ProductDetail) WebsiteURL() string    { return pd.websiteURL }
+func (pd ProductDetail) Categories() []string  { return pd.categories }
+func (pd ProductDetail) SocialLinks() []string { return pd.socialLinks }
+
+type LeaderboardEntry = Product
 
 // ProductSource is the core abstraction for data access.
 // Sync methods only — no bubbletea dependency.

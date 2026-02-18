@@ -42,6 +42,8 @@ func ParseProductDetail(reader io.Reader) (types.ProductDetail, error) {
 
 	// Website URL from visit-website button
 	websiteURL, _ := doc.Find("a[data-test='visit-website-button']").Attr("href")
+	categories := parseDetailCategories(doc)
+	socialLinks := parseSocialLinks(doc)
 
 	// Description: short product blurb
 	description := strings.TrimSpace(
@@ -55,7 +57,7 @@ func ParseProductDetail(reader io.Reader) (types.ProductDetail, error) {
 	makerComment := parseMakerComment(doc)
 
 	product := types.NewProduct(name, tagline, nil, 0, 0, slug, thumbnailURL, 0)
-	detail := types.NewProductDetail(product, description, rating, reviewCount, followerCount, makerComment, websiteURL)
+	detail := types.NewProductDetail(product, description, rating, reviewCount, followerCount, makerComment, websiteURL, categories, socialLinks)
 
 	return detail, nil
 }
@@ -175,4 +177,47 @@ func parseMakerComment(doc *goquery.Document) string {
 		comment = strings.Join(parts, "\n\n")
 	})
 	return comment
+}
+
+func parseDetailCategories(doc *goquery.Document) []string {
+	seen := make(map[string]struct{})
+	categories := make([]string, 0)
+	doc.Find("a[href^='/topics/']").Each(func(_ int, s *goquery.Selection) {
+		cat := strings.TrimSpace(s.Text())
+		if cat == "" {
+			return
+		}
+		if _, ok := seen[cat]; ok {
+			return
+		}
+		seen[cat] = struct{}{}
+		categories = append(categories, cat)
+	})
+	return categories
+}
+
+func parseSocialLinks(doc *goquery.Document) []string {
+	seen := make(map[string]struct{})
+	links := make([]string, 0)
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
+		href, ok := s.Attr("href")
+		if !ok {
+			return
+		}
+		h := strings.TrimSpace(href)
+		if h == "" {
+			return
+		}
+		if strings.Contains(h, "producthunt.com") {
+			return
+		}
+		if strings.Contains(h, "linkedin.com") || strings.Contains(h, "x.com") || strings.Contains(h, "twitter.com") {
+			if _, exists := seen[h]; exists {
+				return
+			}
+			seen[h] = struct{}{}
+			links = append(links, h)
+		}
+	})
+	return links
 }

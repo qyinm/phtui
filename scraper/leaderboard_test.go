@@ -18,8 +18,8 @@ func TestParseLeaderboard_Daily(t *testing.T) {
 		t.Fatalf("ParseLeaderboard returned error: %v", err)
 	}
 
-	if len(products) < 5 {
-		t.Fatalf("expected at least 5 products, got %d", len(products))
+	if len(products) < 10 {
+		t.Fatalf("expected at least 10 products, got %d", len(products))
 	}
 
 	// First product assertions
@@ -69,8 +69,8 @@ func TestParseLeaderboard_Weekly(t *testing.T) {
 		t.Fatalf("ParseLeaderboard returned error: %v", err)
 	}
 
-	if len(products) < 5 {
-		t.Fatalf("expected at least 5 products, got %d", len(products))
+	if len(products) < 10 {
+		t.Fatalf("expected at least 10 products, got %d", len(products))
 	}
 
 	first := products[0]
