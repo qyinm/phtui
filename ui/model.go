@@ -24,6 +24,12 @@ const (
 	DetailView
 )
 
+// tabRegion represents a clickable region in the tab bar.
+type tabRegion struct {
+	xStart, xEnd int
+	period       types.Period
+}
+
 // dateRegion represents a clickable region in the date bar.
 type dateRegion struct {
 	xStart, xEnd int
@@ -373,9 +379,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading {
 			return m, nil
 		}
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
-			// Date bar is on row 1 (0-indexed: row 0 = tab bar, row 1 = date bar)
-			if m.state == ListView && msg.Y == 1 {
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease && m.state == ListView {
+			// Row 0: period tab bar (Daily / Weekly / Monthly)
+			if msg.Y == 0 {
+				for _, r := range lastTabBarRegions {
+					if msg.X >= r.xStart && msg.X < r.xEnd {
+						if r.period != m.period {
+							m.period = r.period
+							m.state = ListView
+							m.loading = true
+							m.statusMsg = "Loading..."
+							if m.source == nil {
+								return m, nil
+							}
+							m.requestID++
+							return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+						}
+						break
+					}
+				}
+			}
+			// Row 1: date selector bar
+			if msg.Y == 1 {
 				for _, r := range lastDateBarRegions {
 					if msg.X >= r.xStart && msg.X < r.xEnd {
 						return m.handleDateBarClick(r)
@@ -463,14 +488,21 @@ func (m Model) renderTabBar() string {
 	}
 
 	var parts []string
+	var tabRegs []tabRegion
+	x := 0
 	for _, t := range tabs {
+		// Padding(0,1) adds 1 space each side, so rendered width = len(label) + 2
+		rendered := lipgloss.Width(t.label) + 2 // Padding(0,1) = 1 left + 1 right
+		tabRegs = append(tabRegs, tabRegion{xStart: x, xEnd: x + rendered, period: t.period})
 		if t.period == m.period {
 			parts = append(parts, ActiveTabStyle.Render(t.label))
 		} else {
 			parts = append(parts, InactiveTabStyle.Render(t.label))
 		}
+		x += rendered
 	}
 	line1 := strings.Join(parts, "")
+	lastTabBarRegions = tabRegs
 
 	// Line 2: date selector bar
 	line2, regions := m.buildDateBar()
@@ -478,6 +510,9 @@ func (m Model) renderTabBar() string {
 
 	return line1 + "\n" + line2
 }
+
+// lastTabBarRegions stores click regions from the last render (single-threaded TUI).
+var lastTabBarRegions []tabRegion
 
 // lastDateBarRegions stores click regions from the last render (single-threaded TUI).
 var lastDateBarRegions []dateRegion
@@ -509,6 +544,11 @@ func (m Model) buildDailyDateBar() (string, []dateRegion) {
 	x += aw
 
 	year, month, _ := m.date.Date()
+
+	// Month/year label so user knows which month they're viewing
+	monthLabel := fmt.Sprintf("%s %d ", m.date.Month().String()[:3], year)
+	b.WriteString(DateItemStyle.Render(monthLabel))
+	x += lipgloss.Width(monthLabel)
 	loc := m.date.Location()
 	daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
 	today := time.Now()
