@@ -23,5 +23,10 @@ Thumbs.db
 go.work
 go.work.sum
 
+# Env and local data
+.env
+.env.*
+*.db
+
 # Sisyphus
 .sisyphus/
