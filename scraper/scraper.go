@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,8 +13,10 @@ import (
 )
 
 const (
-	baseURL   = "https://www.producthunt.com"
-	userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	baseURL        = "https://www.producthunt.com"
+	userAgent      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	searchPageSize = 10
+	maxSearchPages = 10
 )
 
 // Scraper implements types.ProductSource using HTTP client and in-memory cache.
@@ -126,6 +130,136 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 	s.mu.Unlock()
 
 	return detail, nil
+}
+
+// SearchProducts fetches Product Hunt global search results for the query.
+func (s *Scraper) SearchProducts(query string) ([]types.Product, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+
+	all := make([]types.Product, 0, searchPageSize)
+	seen := make(map[string]struct{})
+
+	for page := 1; page <= maxSearchPages; page++ {
+		products, _, _, hasNext, _, err := s.SearchProductsPage(q, page)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break
+		}
+		if len(products) == 0 {
+			break
+		}
+
+		added := 0
+		for _, p := range products {
+			if p.Slug() == "" {
+				continue
+			}
+			if _, ok := seen[p.Slug()]; ok {
+				continue
+			}
+			seen[p.Slug()] = struct{}{}
+			all = append(all, types.NewProduct(
+				p.Name(),
+				p.Tagline(),
+				p.Categories(),
+				p.VoteCount(),
+				p.CommentCount(),
+				p.Slug(),
+				p.ThumbnailURL(),
+				len(all)+1,
+			))
+			added++
+		}
+
+		if added == 0 || len(products) < searchPageSize || !hasNext {
+			break
+		}
+	}
+
+	return all, nil
+}
+
+// SearchProductsPage fetches a single search results page and paging metadata.
+func (s *Scraper) SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	escaped := url.QueryEscape(query)
+	searchURL := fmt.Sprintf("%s/search?q=%s&page=%d", baseURL, escaped, page)
+
+	s.mu.Lock()
+	if cached, ok := s.cache[searchURL]; ok {
+		s.mu.Unlock()
+		if searchCached, ok := cached.value.(searchPageCache); ok {
+			return searchCached.products, searchCached.page, searchCached.hasPrev, searchCached.hasNext, searchCached.pagesCount, nil
+		}
+		if products, ok := cached.value.([]types.Product); ok {
+			return products, page, page > 1, len(products) >= searchPageSize, page, nil
+		}
+	} else {
+		s.mu.Unlock()
+	}
+
+	req, err := http.NewRequest("GET", searchURL, nil)
+	if err != nil {
+		return nil, page, false, false, page, fmt.Errorf("create search request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, page, false, false, page, fmt.Errorf("fetch search results: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, page, false, false, page, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, page, false, false, page, fmt.Errorf("read search results: %w", err)
+	}
+
+	products, err := ParseSearchResults(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, page, false, false, page, fmt.Errorf("parse search results: %w", err)
+	}
+	currentPage, hasPrev, hasNext, pagesCount, ok := parseSearchPageInfo(string(body))
+	if !ok {
+		currentPage = page
+		hasPrev = page > 1
+		hasNext = len(products) >= searchPageSize
+		pagesCount = 0
+	}
+
+	s.mu.Lock()
+	s.cache[searchURL] = cachedResult{
+		value: searchPageCache{
+			products:   products,
+			page:       currentPage,
+			hasPrev:    hasPrev,
+			hasNext:    hasNext,
+			pagesCount: pagesCount,
+		},
+		timestamp: time.Now(),
+	}
+	s.mu.Unlock()
+
+	return products, currentPage, hasPrev, hasNext, pagesCount, nil
+}
+
+type searchPageCache struct {
+	products   []types.Product
+	page       int
+	hasPrev    bool
+	hasNext    bool
+	pagesCount int
 }
 
 // ClearCache clears the in-memory cache.

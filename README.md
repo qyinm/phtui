@@ -53,12 +53,14 @@ phtui
 | `Tab` | Cycle period (Daily/Weekly/Monthly) |
 | `1` `2` `3` | Switch to Daily/Weekly/Monthly |
 | `h` / `l` | Previous/next date |
+| `/` | Global product search |
 | `o` | Open in browser |
 | `r` | Refresh |
 | `?` | Toggle help |
 | `q` | Quit |
 
 Mouse clicks are supported on the period tabs and date bar.
+Use `/` to open search input, type a query, then press `Enter` to run global search.
 
 ## Architecture
 

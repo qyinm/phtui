@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -58,6 +59,13 @@ type Model struct {
 	detail         types.ProductDetail
 	requestID      int
 	dateBarRegions []dateRegion
+	searchMode     bool
+	searchQuery    string
+	searchResults  bool
+	searchPage     int
+	searchHasPrev  bool
+	searchHasNext  bool
+	searchPages    int
 }
 
 // NewModel creates a new Model with the given ProductSource
@@ -136,31 +144,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Failed to fetch: " + msg.err.Error()
 			return m, nil
 		}
-		items := make([]list.Item, len(msg.products))
-		for i, p := range msg.products {
-			items[i] = p
-		}
 		m.products = msg.products
+		m.searchResults = false
+		m.searchPage = 0
+		m.searchHasPrev = false
+		m.searchHasNext = false
+		m.searchPages = 0
 		m.selected = 0
 		listHeight := m.height - 4
 		if listHeight < 1 {
 			listHeight = 1
+		}
+		items := make([]list.Item, len(m.products))
+		for i, p := range m.products {
+			items[i] = p
 		}
 		m.list = newProductListModel(items, m.width, listHeight)
 		m.list.Paginator.Page = 0
 		m.list.Select(0)
 		m.list.ResetSelected()
 		m.err = nil
-		if len(msg.products) == 0 {
+		if len(m.products) == 0 {
 			m.statusMsg = "No products found for this period"
 		} else {
-			firstRank := msg.products[0].Rank()
-			lastRank := msg.products[len(msg.products)-1].Rank()
+			firstRank := m.products[0].Rank()
+			lastRank := m.products[len(m.products)-1].Rank()
 			selectedRank := firstRank
 			if p, ok := m.selectedProduct(); ok {
 				selectedRank = p.Rank()
 			}
-			m.statusMsg = fmt.Sprintf("Loaded %d products (ranks %d-%d, selected #%d)", len(msg.products), firstRank, lastRank, selectedRank)
+			m.statusMsg = fmt.Sprintf("Loaded %d products (ranks %d-%d, selected #%d)", len(m.products), firstRank, lastRank, selectedRank)
 		}
 		return m, nil
 
@@ -182,6 +195,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = m.detail.Product().Name()
 		return m, nil
 
+	case searchResultsMsg:
+		if msg.requestID != m.requestID {
+			return m, nil
+		}
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.statusMsg = "Search failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.searchQuery = msg.query
+		m.searchMode = false
+		m.searchResults = true
+		m.searchPage = msg.page
+		m.searchHasPrev = msg.hasPrev
+		m.searchHasNext = msg.hasNext
+		m.searchPages = msg.pages
+		m.products = msg.products
+		m.selected = 0
+
+		listHeight := m.height - 4
+		if listHeight < 1 {
+			listHeight = 1
+		}
+		items := make([]list.Item, len(m.products))
+		for i, p := range m.products {
+			items[i] = p
+		}
+		m.list = newProductListModel(items, m.width, listHeight)
+		m.list.Paginator.Page = 0
+		m.list.Select(0)
+		m.list.ResetSelected()
+		m.err = nil
+		m.statusMsg = m.searchStatus()
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -200,10 +249,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.state == ListView && m.searchMode {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.searchMode = false
+				m.statusMsg = m.searchStatus()
+				return m, nil
+			case tea.KeyEnter:
+				query := strings.TrimSpace(m.searchQuery)
+				m.searchMode = false
+				if query == "" {
+					m.statusMsg = m.searchStatus()
+					return m, nil
+				}
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Searching..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, query, 1, m.requestID))
+			case tea.KeyCtrlU:
+				m.searchQuery = ""
+				m.statusMsg = m.searchStatus()
+				return m, nil
+			case tea.KeySpace:
+				m.searchQuery += " "
+				m.statusMsg = m.searchStatus()
+				return m, nil
+			case tea.KeyBackspace, tea.KeyDelete:
+				if m.searchQuery != "" {
+					_, size := utf8.DecodeLastRuneInString(m.searchQuery)
+					if size > 0 {
+						m.searchQuery = m.searchQuery[:len(m.searchQuery)-size]
+					}
+				}
+				m.statusMsg = m.searchStatus()
+				return m, nil
+			}
+
+			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+				m.searchQuery += string(msg.Runes)
+				m.statusMsg = m.searchStatus()
+				return m, nil
+			}
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Help):
 			m.help.ShowAll = !m.help.ShowAll
 			m.resizePanes()
+			return m, nil
+
+		case m.state == ListView && key.Matches(msg, m.keys.Search):
+			m.searchMode = true
+			m.statusMsg = m.searchStatus()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Tab):
@@ -267,6 +367,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.PrevDate):
+			if m.searchResults {
+				if !m.searchHasPrev || m.searchPage <= 1 {
+					return m, nil
+				}
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Loading search page..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, m.searchPage-1, m.requestID))
+			}
 			switch m.period {
 			case types.Daily:
 				m.date = m.date.AddDate(0, 0, -1)
@@ -285,6 +397,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.NextDate):
+			if m.searchResults {
+				if !m.searchHasNext {
+					return m, nil
+				}
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Loading search page..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, m.searchPage+1, m.requestID))
+			}
 			var next time.Time
 			switch m.period {
 			case types.Daily:
@@ -308,6 +432,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Refresh):
+			if m.searchResults {
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Refreshing search..."
+				m.requestID++
+				page := m.searchPage
+				if page <= 0 {
+					page = 1
+				}
+				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, page, m.requestID))
+			}
 			m.state = ListView
 			m.loading = true
 			m.statusMsg = "Refreshing..."
@@ -367,7 +504,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case DetailView:
 			if key.Matches(msg, m.keys.Back) {
 				m.state = ListView
-				m.statusMsg = fmt.Sprintf("%d products", len(m.products))
+				m.statusMsg = m.searchStatus()
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -454,7 +591,11 @@ func (m Model) View() string {
 				if available < 1 {
 					available = 1
 				}
-				msg := lipgloss.NewStyle().Foreground(DraculaComment).Render("No products found for this period")
+				emptyText := "No products found for this period"
+				if m.searchResults {
+					emptyText = fmt.Sprintf("No results for \"%s\"", m.searchQuery)
+				}
+				msg := lipgloss.NewStyle().Foreground(DraculaComment).Render(emptyText)
 				sections = append(sections, lipgloss.Place(m.width, available, lipgloss.Center, lipgloss.Center, msg))
 			} else {
 				sections = append(sections, m.renderProductList())
@@ -519,6 +660,10 @@ var lastDateBarRegions []dateRegion
 
 // buildDateBar builds the date selector bar and returns the rendered string and click regions.
 func (m Model) buildDateBar() (string, []dateRegion) {
+	if m.searchResults {
+		return m.buildSearchPageBar()
+	}
+
 	switch m.period {
 	case types.Daily:
 		return m.buildDailyDateBar()
@@ -529,6 +674,41 @@ func (m Model) buildDateBar() (string, []dateRegion) {
 	default:
 		return m.buildDailyDateBar()
 	}
+}
+
+func (m Model) buildSearchPageBar() (string, []dateRegion) {
+	var regions []dateRegion
+	var b strings.Builder
+	x := 0
+
+	left := "◀ "
+	b.WriteString(DateArrowStyle.Render(left))
+	leftW := lipgloss.Width(left)
+	if m.searchHasPrev && m.searchPage > 1 {
+		regions = append(regions, dateRegion{xStart: x, xEnd: x + leftW, action: "search_prev"})
+	}
+	x += leftW
+
+	page := m.searchPage
+	if page <= 0 {
+		page = 1
+	}
+	pages := m.searchPages
+	label := fmt.Sprintf(" Search \"%s\" • Page %d ", m.searchQuery, page)
+	if pages > 0 {
+		label = fmt.Sprintf(" Search \"%s\" • Page %d/%d ", m.searchQuery, page, pages)
+	}
+	b.WriteString(DateItemActiveStyle.Render(label))
+	x += lipgloss.Width(label)
+
+	right := " ▶"
+	b.WriteString(DateArrowStyle.Render(right))
+	rightW := lipgloss.Width(right)
+	if m.searchHasNext {
+		regions = append(regions, dateRegion{xStart: x, xEnd: x + rightW, action: "search_next"})
+	}
+
+	return b.String(), regions
 }
 
 func (m Model) buildDailyDateBar() (string, []dateRegion) {
@@ -703,6 +883,31 @@ func (m Model) periodDisplayName() string {
 }
 
 func (m Model) handleDateBarClick(r dateRegion) (tea.Model, tea.Cmd) {
+	if r.action == "search_prev" || r.action == "search_next" {
+		if !m.searchResults || m.source == nil {
+			return m, nil
+		}
+		targetPage := m.searchPage
+		if targetPage <= 0 {
+			targetPage = 1
+		}
+		if r.action == "search_prev" {
+			if !m.searchHasPrev || targetPage <= 1 {
+				return m, nil
+			}
+			targetPage--
+		} else {
+			if !m.searchHasNext {
+				return m, nil
+			}
+			targetPage++
+		}
+		m.loading = true
+		m.statusMsg = "Loading search page..."
+		m.requestID++
+		return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, targetPage, m.requestID))
+	}
+
 	switch r.action {
 	case "prev_month":
 		switch m.period {
@@ -746,6 +951,24 @@ func (m Model) handleDateBarClick(r dateRegion) (tea.Model, tea.Cmd) {
 	}
 	m.requestID++
 	return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+}
+
+func (m Model) searchStatus() string {
+	if m.searchMode {
+		return fmt.Sprintf("Search (global): %s", m.searchQuery)
+	}
+	if m.searchResults {
+		page := m.searchPage
+		if page <= 0 {
+			page = 1
+		}
+		pages := m.searchPages
+		if pages > 0 {
+			return fmt.Sprintf("Search \"%s\" • page %d/%d • %d results", m.searchQuery, page, pages, len(m.products))
+		}
+		return fmt.Sprintf("Search \"%s\" • page %d • %d results", m.searchQuery, page, len(m.products))
+	}
+	return fmt.Sprintf("%d products", len(m.products))
 }
 
 func (m Model) selectedProduct() (types.Product, bool) {

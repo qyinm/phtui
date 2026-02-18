@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,17 @@ type productDetailMsg struct {
 	err       error
 }
 
+type searchResultsMsg struct {
+	requestID int
+	query     string
+	page      int
+	hasPrev   bool
+	hasNext   bool
+	pages     int
+	products  []types.Product
+	err       error
+}
+
 // fetchLeaderboard returns a tea.Cmd that fetches the leaderboard asynchronously
 func fetchLeaderboard(source types.ProductSource, period types.Period, date time.Time, requestID int) tea.Cmd {
 	return func() tea.Msg {
@@ -34,5 +46,34 @@ func fetchProductDetail(source types.ProductSource, slug string, requestID int) 
 	return func() tea.Msg {
 		detail, err := source.GetProductDetail(slug)
 		return productDetailMsg{requestID: requestID, detail: detail, err: err}
+	}
+}
+
+type searchableSource interface {
+	SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error)
+}
+
+func fetchSearchResults(source types.ProductSource, query string, page int, requestID int) tea.Cmd {
+	return func() tea.Msg {
+		searchable, ok := source.(searchableSource)
+		if !ok {
+			return searchResultsMsg{
+				requestID: requestID,
+				query:     query,
+				page:      page,
+				err:       fmt.Errorf("search not supported by source"),
+			}
+		}
+		products, currentPage, hasPrev, hasNext, pagesCount, err := searchable.SearchProductsPage(query, page)
+		return searchResultsMsg{
+			requestID: requestID,
+			query:     query,
+			page:      currentPage,
+			hasPrev:   hasPrev,
+			hasNext:   hasNext,
+			pages:     pagesCount,
+			products:  products,
+			err:       err,
+		}
 	}
 }
