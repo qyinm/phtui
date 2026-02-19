@@ -1096,6 +1096,22 @@ func (m Model) renderDetailContent() string {
 	b.WriteString(stats)
 	b.WriteString("\n")
 
+	if !d.LaunchDate().IsZero() {
+		b.WriteString(fmt.Sprintf("🚀 Launched: %s\n", d.LaunchDate().Format("January 2, 2006")))
+	}
+
+	if d.MakerName() != "" {
+		maker := fmt.Sprintf("👤 Maker: %s", d.MakerName())
+		if d.MakerProfileURL() != "" {
+			maker += fmt.Sprintf(" (%s)", d.MakerProfileURL())
+		}
+		b.WriteString(maker + "\n")
+	}
+
+	if d.PricingInfo() != "" {
+		b.WriteString(fmt.Sprintf("💰 %s\n", d.PricingInfo()))
+	}
+
 	if d.WebsiteURL() != "" {
 		b.WriteString(fmt.Sprintf("🌐 %s\n", d.WebsiteURL()))
 	}
@@ -1111,6 +1127,39 @@ func (m Model) renderDetailContent() string {
 		b.WriteString("\n--- Maker Comment ---\n")
 		b.WriteString(d.MakerComment())
 		b.WriteString("\n")
+	}
+
+	if len(d.ProConTags()) > 0 {
+		var pros, cons, others []string
+		for _, tag := range d.ProConTags() {
+			label := fmt.Sprintf("%s (%d)", tag.Name(), tag.Count())
+			switch tag.TagType() {
+			case "Positive":
+				pros = append(pros, label)
+			case "Negative":
+				cons = append(cons, label)
+			default:
+				others = append(others, label)
+			}
+		}
+		if len(pros) > 0 {
+			b.WriteString("\n👍 Pros:\n")
+			for _, p := range pros {
+				b.WriteString("  + " + p + "\n")
+			}
+		}
+		if len(cons) > 0 {
+			b.WriteString("\n👎 Cons:\n")
+			for _, c := range cons {
+				b.WriteString("  - " + c + "\n")
+			}
+		}
+		if len(others) > 0 {
+			b.WriteString("\nℹ️ Other:\n")
+			for _, o := range others {
+				b.WriteString("  * " + o + "\n")
+			}
+		}
 	}
 
 	if len(d.Categories()) > 0 {

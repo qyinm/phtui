@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseProductDetail(t *testing.T) {
@@ -73,6 +74,50 @@ func TestParseProductDetail(t *testing.T) {
 	}
 	if len(detail.SocialLinks()) == 0 {
 		t.Error("SocialLinks is empty")
+	}
+
+	// Launch date should be parsed
+	if got := detail.LaunchDate(); got.IsZero() {
+		t.Error("LaunchDate is zero, expected valid date")
+	}
+
+	// Maker name
+	if got := detail.MakerName(); got != "Vincent Zhu" {
+		t.Errorf("MakerName = %q, want %q", got, "Vincent Zhu")
+	}
+
+	// Maker profile URL
+	if got := detail.MakerProfileURL(); got == "" {
+		t.Error("MakerProfileURL is empty")
+	}
+
+	// Pricing should be "Free" (price:0 in test data)
+	if got := detail.PricingInfo(); got != "Free" {
+		t.Errorf("PricingInfo = %q, want %q", got, "Free")
+	}
+
+	// Pro/Con tags
+	if len(detail.ProConTags()) == 0 {
+		t.Error("ProConTags is empty, expected at least one")
+	}
+	// Should have both Positive and Negative tags
+	var hasPositive, hasNegative bool
+	for _, tag := range detail.ProConTags() {
+		if tag.TagType() == "Positive" {
+			hasPositive = true
+		}
+		if tag.TagType() == "Negative" {
+			hasNegative = true
+		}
+		if tag.Count() <= 0 {
+			t.Errorf("ProConTag %q has count %d, want > 0", tag.Name(), tag.Count())
+		}
+	}
+	if !hasPositive {
+		t.Error("No Positive ProConTags found")
+	}
+	if !hasNegative {
+		t.Error("No Negative ProConTags found")
 	}
 }
 
@@ -177,5 +222,94 @@ func TestParseProductDetailMinimalHTML(t *testing.T) {
 	}
 	if len(detail.SocialLinks()) != 0 {
 		t.Errorf("SocialLinks length = %d, want 0", len(detail.SocialLinks()))
+	}
+	if got := detail.LaunchDate(); !got.IsZero() {
+		t.Errorf("LaunchDate = %v, want zero", got)
+	}
+	if got := detail.MakerName(); got != "" {
+		t.Errorf("MakerName = %q, want empty", got)
+	}
+	if got := detail.MakerProfileURL(); got != "" {
+		t.Errorf("MakerProfileURL = %q, want empty", got)
+	}
+	if got := detail.PricingInfo(); got != "" {
+		t.Errorf("PricingInfo = %q, want empty", got)
+	}
+	if len(detail.ProConTags()) != 0 {
+		t.Errorf("ProConTags length = %d, want 0", len(detail.ProConTags()))
+	}
+}
+
+func TestParseProductDetailLaunchDateUsesEarliestFeaturedAt(t *testing.T) {
+	html := `<!DOCTYPE html><html><head>
+	<link rel="canonical" href="https://www.producthunt.com/products/demo">
+	</head><body>
+	<div data-test="header"><h1>Demo</h1><h2 class="text-18">Demo tagline</h2></div>
+	<script>{"featuredAt":"2026-02-05T00:01:00-08:00","featuredAt":"2025-02-18T00:01:00-08:00"}</script>
+	</body></html>`
+
+	detail, err := ParseProductDetail(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("ParseProductDetail: %v", err)
+	}
+
+	got := detail.LaunchDate()
+	want, _ := time.Parse(time.RFC3339, "2025-02-18T00:01:00-08:00")
+	if !got.Equal(want) {
+		t.Errorf("LaunchDate = %v, want %v", got, want)
+	}
+}
+
+func TestParseProductDetailProConTagUsesMaxCountForDuplicates(t *testing.T) {
+	html := `<!DOCTYPE html><html><head>
+	<link rel="canonical" href="https://www.producthunt.com/products/demo">
+	</head><body>
+	<div data-test="header"><h1>Demo</h1><h2 class="text-18">Demo tagline</h2></div>
+	<script>{
+	"__typename":"ReviewAiProConTag","id":"1","name":"smart replies","type":"Positive","count":2,
+	"__typename":"ReviewAiProConTag","id":"2","name":"smart replies","type":"Positive","count":9,
+	"__typename":"ReviewAiProConTag","id":"3","name":"mobile","type":"Negative","count":1
+	}</script>
+	</body></html>`
+
+	detail, err := ParseProductDetail(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("ParseProductDetail: %v", err)
+	}
+
+	if len(detail.ProConTags()) != 2 {
+		t.Fatalf("ProConTags length = %d, want 2", len(detail.ProConTags()))
+	}
+
+	counts := map[string]int{}
+	for _, tag := range detail.ProConTags() {
+		counts[tag.Name()+"|"+tag.TagType()] = tag.Count()
+	}
+	if got := counts["smart replies|Positive"]; got != 9 {
+		t.Errorf("smart replies Positive count = %d, want 9", got)
+	}
+	if got := counts["mobile|Negative"]; got != 1 {
+		t.Errorf("mobile Negative count = %d, want 1", got)
+	}
+}
+
+func TestParseProductDetailPricingPrefersJSONLDProductPrice(t *testing.T) {
+	html := `<!DOCTYPE html><html><head>
+	<link rel="canonical" href="https://www.producthunt.com/products/demo">
+	<script type="application/ld+json">
+	{"@context":"https://schema.org","@type":"Product","name":"Demo","offers":{"@type":"Offer","price":49,"priceCurrency":"USD"}}
+	</script>
+	</head><body>
+	<div data-test="header"><h1>Demo</h1><h2 class="text-18">Demo tagline</h2></div>
+	<script>{"price":0,"someOtherNode":{"price":0}}</script>
+	</body></html>`
+
+	detail, err := ParseProductDetail(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("ParseProductDetail: %v", err)
+	}
+
+	if got := detail.PricingInfo(); got != "$49" {
+		t.Errorf("PricingInfo = %q, want %q", got, "$49")
 	}
 }

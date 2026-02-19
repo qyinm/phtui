@@ -1,12 +1,14 @@
 package scraper
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/qyinm/phtui/types"
@@ -56,8 +58,14 @@ func ParseProductDetail(reader io.Reader) (types.ProductDetail, error) {
 	// Maker comment from "Maker Comment" section
 	makerComment := parseMakerComment(doc)
 
+	// New fields
+	launchDate := parseLaunchDate(doc)
+	makerName, makerProfileURL := parseMakerInfo(doc)
+	proConTags := parseProConTags(doc)
+	pricingInfo := parsePricing(doc)
+
 	product := types.NewProduct(name, tagline, nil, 0, 0, slug, thumbnailURL, 0)
-	detail := types.NewProductDetail(product, description, rating, reviewCount, followerCount, makerComment, websiteURL, categories, socialLinks)
+	detail := types.NewProductDetail(product, description, rating, reviewCount, followerCount, makerComment, websiteURL, categories, socialLinks, launchDate, makerName, makerProfileURL, proConTags, pricingInfo)
 
 	return detail, nil
 }
@@ -220,4 +228,212 @@ func parseSocialLinks(doc *goquery.Document) []string {
 		}
 	})
 	return links
+}
+
+// parseLaunchDate extracts the launch date from "featuredAt" in SSR JSON.
+func parseLaunchDate(doc *goquery.Document) time.Time {
+	html, err := doc.Html()
+	if err != nil {
+		return time.Time{}
+	}
+	re := regexp.MustCompile(`"featuredAt":"([^"]+)"`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return time.Time{}
+	}
+
+	var launch time.Time
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		t, parseErr := time.Parse(time.RFC3339, m[1])
+		if parseErr != nil {
+			continue
+		}
+		// "featuredAt" can appear multiple times in SSR payloads; choose the earliest.
+		if launch.IsZero() || t.Before(launch) {
+			launch = t
+		}
+	}
+	return launch
+}
+
+// parseMakerInfo extracts maker name and profile URL from meta/link tags.
+func parseMakerInfo(doc *goquery.Document) (string, string) {
+	name, _ := doc.Find("meta[name='author']").Attr("content")
+	profileURL, _ := doc.Find("link[rel='author']").Attr("href")
+	return strings.TrimSpace(name), strings.TrimSpace(profileURL)
+}
+
+// parseProConTags extracts AI-summarized pro/con tags from SSR JSON.
+func parseProConTags(doc *goquery.Document) []types.ProConTag {
+	html, err := doc.Html()
+	if err != nil {
+		return nil
+	}
+	re := regexp.MustCompile(`"__typename":"ReviewAiProConTag","id":"(\d+)","name":"([^"]+)","type":"(\w+)","count":(\d+)`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	// Deduplicate by name+type and keep the highest count if duplicates disagree.
+	type key struct{ name, tagType string }
+	maxCounts := make(map[key]int)
+	order := make([]key, 0)
+
+	for _, m := range matches {
+		if len(m) < 5 {
+			continue
+		}
+		name := m[2]
+		tagType := m[3]
+		count, _ := strconv.Atoi(m[4])
+		k := key{name, tagType}
+		if prev, exists := maxCounts[k]; exists {
+			if count > prev {
+				maxCounts[k] = count
+			}
+			continue
+		}
+		maxCounts[k] = count
+		order = append(order, k)
+	}
+
+	tags := make([]types.ProConTag, 0, len(order))
+	for _, k := range order {
+		tags = append(tags, types.NewProConTag(k.name, k.tagType, maxCounts[k]))
+	}
+	return tags
+}
+
+// parsePricing extracts pricing info from SSR JSON "price" field.
+func parsePricing(doc *goquery.Document) string {
+	if price, ok := parsePricingFromJSONLD(doc); ok {
+		return formatPrice(price)
+	}
+
+	html, err := doc.Html()
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile(`"price":(\d+)`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+
+	minPrice := -1
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		price, convErr := strconv.Atoi(m[1])
+		if convErr != nil {
+			continue
+		}
+		if minPrice == -1 || price < minPrice {
+			minPrice = price
+		}
+	}
+	if minPrice < 0 {
+		return ""
+	}
+	return formatPrice(minPrice)
+}
+
+func parsePricingFromJSONLD(doc *goquery.Document) (int, bool) {
+	var prices []int
+	doc.Find(`script[type='application/ld+json']`).Each(func(_ int, s *goquery.Selection) {
+		script := strings.TrimSpace(s.Text())
+		if script == "" {
+			return
+		}
+		var payload any
+		if err := json.Unmarshal([]byte(script), &payload); err != nil {
+			return
+		}
+		collectProductPrices(payload, &prices)
+	})
+	if len(prices) == 0 {
+		return 0, false
+	}
+	minPrice := prices[0]
+	for _, p := range prices[1:] {
+		if p < minPrice {
+			minPrice = p
+		}
+	}
+	return minPrice, true
+}
+
+func collectProductPrices(node any, prices *[]int) {
+	switch v := node.(type) {
+	case map[string]any:
+		if isProductType(v["@type"]) {
+			if price, ok := extractOfferPrice(v["offers"]); ok {
+				*prices = append(*prices, price)
+			}
+		}
+		for _, child := range v {
+			collectProductPrices(child, prices)
+		}
+	case []any:
+		for _, item := range v {
+			collectProductPrices(item, prices)
+		}
+	}
+}
+
+func isProductType(v any) bool {
+	switch t := v.(type) {
+	case string:
+		return t == "Product"
+	case []any:
+		for _, item := range t {
+			s, ok := item.(string)
+			if ok && s == "Product" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func extractOfferPrice(v any) (int, bool) {
+	switch offers := v.(type) {
+	case map[string]any:
+		return parsePriceValue(offers["price"])
+	case []any:
+		for _, item := range offers {
+			if offer, ok := item.(map[string]any); ok {
+				if price, priceOK := parsePriceValue(offer["price"]); priceOK {
+					return price, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+func parsePriceValue(v any) (int, bool) {
+	switch value := v.(type) {
+	case float64:
+		return int(value), true
+	case string:
+		price, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0, false
+		}
+		return price, true
+	}
+	return 0, false
+}
+
+func formatPrice(price int) string {
+	if price == 0 {
+		return "Free"
+	}
+	return fmt.Sprintf("$%d", price)
 }

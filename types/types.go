@@ -96,44 +96,76 @@ func (p Product) FilterValue() string { return p.name }
 // Compile-time check that Product implements list.Item
 var _ list.Item = Product{}
 
+// ProConTag represents an AI-summarized pro or con from user reviews
+type ProConTag struct {
+	name    string
+	tagType string // "Positive" or "Negative"
+	count   int
+}
+
+// NewProConTag creates a new ProConTag
+func NewProConTag(name, tagType string, count int) ProConTag {
+	return ProConTag{name: name, tagType: tagType, count: count}
+}
+
+// Getters for ProConTag fields
+func (t ProConTag) Name() string    { return t.name }
+func (t ProConTag) TagType() string { return t.tagType }
+func (t ProConTag) Count() int      { return t.count }
+
 // ProductDetail extends Product with full detail page data
 type ProductDetail struct {
-	product       Product
-	description   string
-	rating        float64
-	reviewCount   int
-	followerCount int
-	makerComment  string
-	websiteURL    string
-	categories    []string
-	socialLinks   []string
+	product         Product
+	description     string
+	rating          float64
+	reviewCount     int
+	followerCount   int
+	makerComment    string
+	websiteURL      string
+	categories      []string
+	socialLinks     []string
+	launchDate      time.Time
+	makerName       string
+	makerProfileURL string
+	proConTags      []ProConTag
+	pricingInfo     string
 }
 
 // NewProductDetail creates a new ProductDetail
-func NewProductDetail(product Product, description string, rating float64, reviewCount, followerCount int, makerComment, websiteURL string, categories, socialLinks []string) ProductDetail {
+func NewProductDetail(product Product, description string, rating float64, reviewCount, followerCount int, makerComment, websiteURL string, categories, socialLinks []string, launchDate time.Time, makerName, makerProfileURL string, proConTags []ProConTag, pricingInfo string) ProductDetail {
 	return ProductDetail{
-		product:       product,
-		description:   description,
-		rating:        rating,
-		reviewCount:   reviewCount,
-		followerCount: followerCount,
-		makerComment:  makerComment,
-		websiteURL:    websiteURL,
-		categories:    categories,
-		socialLinks:   socialLinks,
+		product:         product,
+		description:     description,
+		rating:          rating,
+		reviewCount:     reviewCount,
+		followerCount:   followerCount,
+		makerComment:    makerComment,
+		websiteURL:      websiteURL,
+		categories:      categories,
+		socialLinks:     socialLinks,
+		launchDate:      launchDate,
+		makerName:       makerName,
+		makerProfileURL: makerProfileURL,
+		proConTags:      proConTags,
+		pricingInfo:     pricingInfo,
 	}
 }
 
 // Getters for ProductDetail fields
-func (pd ProductDetail) Product() Product      { return pd.product }
-func (pd ProductDetail) Description() string   { return pd.description }
-func (pd ProductDetail) Rating() float64       { return pd.rating }
-func (pd ProductDetail) ReviewCount() int      { return pd.reviewCount }
-func (pd ProductDetail) FollowerCount() int    { return pd.followerCount }
-func (pd ProductDetail) MakerComment() string  { return pd.makerComment }
-func (pd ProductDetail) WebsiteURL() string    { return pd.websiteURL }
-func (pd ProductDetail) Categories() []string  { return pd.categories }
-func (pd ProductDetail) SocialLinks() []string { return pd.socialLinks }
+func (pd ProductDetail) Product() Product        { return pd.product }
+func (pd ProductDetail) Description() string     { return pd.description }
+func (pd ProductDetail) Rating() float64         { return pd.rating }
+func (pd ProductDetail) ReviewCount() int        { return pd.reviewCount }
+func (pd ProductDetail) FollowerCount() int      { return pd.followerCount }
+func (pd ProductDetail) MakerComment() string    { return pd.makerComment }
+func (pd ProductDetail) WebsiteURL() string      { return pd.websiteURL }
+func (pd ProductDetail) Categories() []string    { return pd.categories }
+func (pd ProductDetail) SocialLinks() []string   { return pd.socialLinks }
+func (pd ProductDetail) LaunchDate() time.Time   { return pd.launchDate }
+func (pd ProductDetail) MakerName() string       { return pd.makerName }
+func (pd ProductDetail) MakerProfileURL() string { return pd.makerProfileURL }
+func (pd ProductDetail) ProConTags() []ProConTag  { return pd.proConTags }
+func (pd ProductDetail) PricingInfo() string     { return pd.pricingInfo }
 
 type LeaderboardEntry = Product
 
