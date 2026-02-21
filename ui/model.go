@@ -29,6 +29,7 @@ const (
 type tabRegion struct {
 	xStart, xEnd int
 	period       types.Period
+	isCategory   bool // true if this region is the Categories tab
 }
 
 // dateRegion represents a clickable region in the date bar.
@@ -66,6 +67,23 @@ type Model struct {
 	searchHasPrev  bool
 	searchHasNext  bool
 	searchPages    int
+	// Category browsing
+	categoryMode bool
+	categorySlug string
+	categoryName string
+	categoryIdx  int // index within AllCategories for h/l nav
+	// Category split pane (left: categories, right: products)
+	categorySelectMode bool            // true = split pane mode
+	catSelectIdx       int             // left pane cursor position
+	catFilterMode      bool            // true = typing category filter query
+	catFilterQuery     string          // filter text
+	catFilteredIndices []int           // indices into AllCategories matching filter
+	splitFocus         int             // 0=left(categories), 1=right(products)
+	splitProducts      []types.Product // right pane product list
+	splitSelected      int             // right pane product cursor
+	splitLoading       bool            // right pane loading
+	splitSlug          string          // slug of loaded category in right pane
+	splitRequestID     int             // request id for in-flight split-pane category fetch
 }
 
 // NewModel creates a new Model with the given ProductSource
@@ -150,6 +168,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchHasPrev = false
 		m.searchHasNext = false
 		m.searchPages = 0
+		m.categoryMode = false
+		m.categorySlug = ""
+		m.categoryName = ""
 		m.selected = 0
 		listHeight := m.height - 4
 		if listHeight < 1 {
@@ -231,8 +252,93 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = m.searchStatus()
 		return m, nil
 
+	case categoryProductsMsg:
+		if m.categorySelectMode {
+			if msg.requestID != m.splitRequestID {
+				return m, nil
+			}
+			// Split pane mode — update right pane only
+			m.splitLoading = false
+			m.loading = false
+			if msg.err != nil {
+				m.err = msg.err
+				m.statusMsg = "Failed to fetch: " + msg.err.Error()
+				return m, nil
+			}
+			m.splitProducts = msg.products
+			m.splitSelected = 0
+			m.splitSlug = msg.slug
+			m.err = nil
+			// Derive display name for status
+			catName := slugToDisplayName(msg.slug)
+			idx := types.CategoryIndexBySlug(msg.slug)
+			if idx >= 0 && idx < len(types.AllCategories) && types.AllCategories[idx].Slug() == msg.slug {
+				catName = types.AllCategories[idx].Name()
+			}
+			if len(m.splitProducts) == 0 {
+				m.statusMsg = fmt.Sprintf("No products in %s", catName)
+			} else {
+				m.statusMsg = fmt.Sprintf("%d products in %s", len(m.splitProducts), catName)
+			}
+			return m, nil
+		}
+		// Ignore category responses when we are not actively waiting for one.
+		// This prevents stale split-pane responses from switching the main view.
+		if !m.loading {
+			return m, nil
+		}
+		if msg.requestID != m.requestID {
+			return m, nil
+		}
+		// Standalone category mode (via h/l navigation)
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.statusMsg = "Failed to fetch category: " + msg.err.Error()
+			return m, nil
+		}
+		m.categoryMode = true
+		m.categorySelectMode = false
+		m.categorySlug = msg.slug
+		m.searchResults = false
+		m.searchPage = 0
+		m.searchHasPrev = false
+		m.searchHasNext = false
+		m.searchPages = 0
+		m.categoryIdx = types.CategoryIndexBySlug(msg.slug)
+		if m.categoryIdx < 0 {
+			m.categoryIdx = 0
+		}
+		if m.categoryIdx >= 0 && m.categoryIdx < len(types.AllCategories) && types.AllCategories[m.categoryIdx].Slug() == msg.slug {
+			m.categoryName = types.AllCategories[m.categoryIdx].Name()
+		} else {
+			m.categoryName = slugToDisplayName(msg.slug)
+		}
+		m.products = msg.products
+		m.selected = 0
+
+		listHeight := m.height - 4
+		if listHeight < 1 {
+			listHeight = 1
+		}
+		items := make([]list.Item, len(m.products))
+		for i, p := range m.products {
+			items[i] = p
+		}
+		m.list = newProductListModel(items, m.width, listHeight)
+		m.list.Paginator.Page = 0
+		m.list.Select(0)
+		m.list.ResetSelected()
+		m.err = nil
+		if len(m.products) == 0 {
+			m.statusMsg = fmt.Sprintf("No products in %s", m.categoryName)
+		} else {
+			m.statusMsg = fmt.Sprintf("%d products in %s", len(m.products), m.categoryName)
+		}
+		return m, nil
+
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.splitLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -295,6 +401,171 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Category filter text input (typing to filter categories)
+		if m.categorySelectMode && m.catFilterMode {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.catFilterMode = false
+				m.catFilterQuery = ""
+				m.catFilteredIndices = nil
+				m.catSelectIdx = 0
+				m.statusMsg = fmt.Sprintf("Select a category (%d categories)", len(types.AllCategories))
+				return m, nil
+			case tea.KeyEnter:
+				// Apply filter and select first match — load products in right pane
+				visible := m.catVisibleList()
+				if len(visible) > 0 && m.catSelectIdx < len(visible) {
+					m.catFilterMode = false
+					return m, m.loadSelectedCategory()
+				}
+				return m, nil
+			case tea.KeyCtrlU:
+				m.catFilterQuery = ""
+				m.updateCatFilter()
+				m.catSelectIdx = 0
+				m.statusMsg = fmt.Sprintf("Filter: %s", m.catFilterQuery)
+				return m, nil
+			case tea.KeySpace:
+				m.catFilterQuery += " "
+				m.updateCatFilter()
+				m.statusMsg = fmt.Sprintf("Filter: %s", m.catFilterQuery)
+				return m, nil
+			case tea.KeyBackspace, tea.KeyDelete:
+				if m.catFilterQuery != "" {
+					_, size := utf8.DecodeLastRuneInString(m.catFilterQuery)
+					if size > 0 {
+						m.catFilterQuery = m.catFilterQuery[:len(m.catFilterQuery)-size]
+					}
+					m.updateCatFilter()
+					m.catSelectIdx = 0
+				}
+				m.statusMsg = fmt.Sprintf("Filter: %s", m.catFilterQuery)
+				return m, nil
+			}
+
+			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+				m.catFilterQuery += string(msg.Runes)
+				m.updateCatFilter()
+				m.catSelectIdx = 0
+				m.statusMsg = fmt.Sprintf("Filter: %s", m.catFilterQuery)
+				return m, nil
+			}
+
+			// Allow j/k navigation while filtering
+			if key.Matches(msg, m.keys.Down) {
+				visible := m.catVisibleList()
+				if m.catSelectIdx < len(visible)-1 {
+					m.catSelectIdx++
+				}
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Up) {
+				if m.catSelectIdx > 0 {
+					m.catSelectIdx--
+				}
+				return m, nil
+			}
+		}
+
+		// Split pane mode — right pane focused (product list)
+		if m.categorySelectMode && !m.catFilterMode && m.splitFocus == 1 {
+			switch {
+			case key.Matches(msg, m.keys.Back):
+				// Esc → go back to left pane
+				m.splitFocus = 0
+				return m, nil
+			case key.Matches(msg, m.keys.PrevDate):
+				// h → go back to left pane
+				m.splitFocus = 0
+				return m, nil
+			case key.Matches(msg, m.keys.Down):
+				if m.splitSelected < len(m.splitProducts)-1 {
+					m.splitSelected++
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Up):
+				if m.splitSelected > 0 {
+					m.splitSelected--
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Enter):
+				// Open product detail
+				if m.splitSelected >= 0 && m.splitSelected < len(m.splitProducts) {
+					p := m.splitProducts[m.splitSelected]
+					if p.Slug() == "" || m.source == nil {
+						return m, nil
+					}
+					m.loading = true
+					m.statusMsg = "Loading detail..."
+					m.requestID++
+					return m, tea.Batch(m.spinner.Tick, fetchProductDetail(m.source, p.Slug(), m.requestID))
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Open):
+				if m.splitSelected >= 0 && m.splitSelected < len(m.splitProducts) {
+					p := m.splitProducts[m.splitSelected]
+					if p.Slug() != "" {
+						_ = exec.Command("open", "https://www.producthunt.com/products/"+p.Slug()).Start()
+					}
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Split pane mode — left pane focused (category list)
+		if m.categorySelectMode && !m.catFilterMode && m.splitFocus == 0 {
+			switch {
+			case key.Matches(msg, m.keys.Back):
+				// Esc → exit split pane mode
+				m.categorySelectMode = false
+				m.splitLoading = false
+				m.splitRequestID = 0
+				m.requestID++ // invalidate any in-flight split-pane category response
+				if m.categoryMode {
+					m.statusMsg = fmt.Sprintf("%d products in %s", len(m.products), m.categoryName)
+				} else {
+					m.statusMsg = fmt.Sprintf("%d products", len(m.products))
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Search):
+				// / → enter filter mode
+				m.catFilterMode = true
+				m.catFilterQuery = ""
+				m.catFilteredIndices = nil
+				m.catSelectIdx = 0
+				m.statusMsg = "Filter: "
+				return m, nil
+			case key.Matches(msg, m.keys.NextDate):
+				// l → focus right pane
+				if len(m.splitProducts) > 0 {
+					m.splitFocus = 1
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Enter):
+				// Enter → focus right pane
+				if len(m.splitProducts) > 0 {
+					m.splitFocus = 1
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Down):
+				visible := m.catVisibleList()
+				if m.catSelectIdx < len(visible)-1 {
+					m.catSelectIdx++
+					return m, m.loadSelectedCategory()
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.Up):
+				if m.catSelectIdx > 0 {
+					m.catSelectIdx--
+					return m, m.loadSelectedCategory()
+				}
+				return m, nil
+			}
+			// Ignore other keys in left pane
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Help):
 			m.help.ShowAll = !m.help.ShowAll
@@ -307,64 +578,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.Tab):
+			if m.categoryMode || m.categorySelectMode {
+				// From categories/category-select → Daily leaderboard
+				return m.switchToLeaderboard(types.Daily)
+			}
 			switch m.period {
 			case types.Daily:
-				m.period = types.Weekly
+				return m.switchToLeaderboard(types.Weekly)
 			case types.Weekly:
-				m.period = types.Monthly
+				return m.switchToLeaderboard(types.Monthly)
 			case types.Monthly:
-				m.period = types.Daily
+				// Monthly → Category split pane
+				m.state = ListView
+				cmd := m.enterCategorySelectMode()
+				return m, cmd
 			}
-			m.state = ListView
-			m.loading = true
-			m.statusMsg = "Loading..."
-			if m.source == nil {
-				return m, nil
-			}
-			m.requestID++
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
 
 		case key.Matches(msg, m.keys.Daily):
-			if m.period == types.Daily {
+			if m.period == types.Daily && !m.categoryMode && !m.categorySelectMode {
 				return m, nil
 			}
-			m.period = types.Daily
-			m.state = ListView
-			m.loading = true
-			m.statusMsg = "Loading..."
-			if m.source == nil {
-				return m, nil
-			}
-			m.requestID++
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+			return m.switchToLeaderboard(types.Daily)
 
 		case key.Matches(msg, m.keys.Weekly):
-			if m.period == types.Weekly {
+			if m.period == types.Weekly && !m.categoryMode && !m.categorySelectMode {
 				return m, nil
 			}
-			m.period = types.Weekly
-			m.state = ListView
-			m.loading = true
-			m.statusMsg = "Loading..."
-			if m.source == nil {
-				return m, nil
-			}
-			m.requestID++
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+			return m.switchToLeaderboard(types.Weekly)
 
 		case key.Matches(msg, m.keys.Monthly):
-			if m.period == types.Monthly {
+			if m.period == types.Monthly && !m.categoryMode && !m.categorySelectMode {
 				return m, nil
 			}
-			m.period = types.Monthly
+			return m.switchToLeaderboard(types.Monthly)
+
+		case key.Matches(msg, m.keys.Categories):
+			if m.categorySelectMode {
+				return m, nil
+			}
 			m.state = ListView
-			m.loading = true
-			m.statusMsg = "Loading..."
-			if m.source == nil {
-				return m, nil
-			}
-			m.requestID++
-			return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+			cmd := m.enterCategorySelectMode()
+			return m, cmd
 
 		case key.Matches(msg, m.keys.PrevDate):
 			if m.searchResults {
@@ -378,6 +632,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Loading search page..."
 				m.requestID++
 				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, m.searchPage-1, m.requestID))
+			}
+			if m.categoryMode {
+				// Navigate to previous category in AllCategories
+				all := types.AllCategories
+				if len(all) == 0 {
+					return m, nil
+				}
+				idx := types.CategoryIndexBySlug(m.categorySlug)
+				if idx < 0 {
+					idx = 0
+				}
+				idx--
+				if idx < 0 {
+					idx = len(all) - 1
+				}
+				slug := all[idx].Slug()
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Loading category..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchCategoryProducts(m.source, slug, m.requestID))
 			}
 			switch m.period {
 			case types.Daily:
@@ -408,6 +685,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Loading search page..."
 				m.requestID++
 				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, m.searchPage+1, m.requestID))
+			}
+			if m.categoryMode {
+				// Navigate to next category in AllCategories
+				all := types.AllCategories
+				if len(all) == 0 {
+					return m, nil
+				}
+				idx := types.CategoryIndexBySlug(m.categorySlug)
+				if idx < 0 {
+					idx = 0
+				}
+				idx++
+				if idx >= len(all) {
+					idx = 0
+				}
+				slug := all[idx].Slug()
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Loading category..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchCategoryProducts(m.source, slug, m.requestID))
 			}
 			var next time.Time
 			switch m.period {
@@ -444,6 +744,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					page = 1
 				}
 				return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, page, m.requestID))
+			}
+			if m.categoryMode && m.categorySlug != "" {
+				if m.source == nil {
+					return m, nil
+				}
+				m.loading = true
+				m.statusMsg = "Refreshing category..."
+				m.requestID++
+				return m, tea.Batch(m.spinner.Tick, fetchCategoryProducts(m.source, m.categorySlug, m.requestID))
 			}
 			m.state = ListView
 			m.loading = true
@@ -504,7 +813,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case DetailView:
 			if key.Matches(msg, m.keys.Back) {
 				m.state = ListView
-				m.statusMsg = m.searchStatus()
+				if m.categorySelectMode {
+					// Returning to split pane — restore category status
+					catName := slugToDisplayName(m.splitSlug)
+					idx := types.CategoryIndexBySlug(m.splitSlug)
+					if idx >= 0 && idx < len(types.AllCategories) {
+						catName = types.AllCategories[idx].Name()
+					}
+					m.statusMsg = fmt.Sprintf("%d products in %s", len(m.splitProducts), catName)
+				} else {
+					m.statusMsg = m.searchStatus()
+				}
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -517,20 +836,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease && m.state == ListView {
-			// Row 0: period tab bar (Daily / Weekly / Monthly)
+			// Row 0: period tab bar (Daily / Weekly / Monthly / Categories)
 			if msg.Y == 0 {
 				for _, r := range lastTabBarRegions {
 					if msg.X >= r.xStart && msg.X < r.xEnd {
-						if r.period != m.period {
-							m.period = r.period
-							m.state = ListView
-							m.loading = true
-							m.statusMsg = "Loading..."
-							if m.source == nil {
-								return m, nil
+						if r.isCategory {
+							if !m.categorySelectMode {
+								m.state = ListView
+								cmd := m.enterCategorySelectMode()
+								return m, cmd
 							}
-							m.requestID++
-							return m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+						} else {
+							if m.categoryMode || m.categorySelectMode || r.period != m.period {
+								return m.switchToLeaderboard(r.period)
+							}
 						}
 						break
 					}
@@ -586,7 +905,9 @@ func (m Model) View() string {
 	} else {
 		switch m.state {
 		case ListView:
-			if len(m.products) == 0 {
+			if m.categorySelectMode {
+				sections = append(sections, m.renderSplitPane())
+			} else if len(m.products) == 0 {
 				available := m.height - 4 // tab + status + help
 				if available < 1 {
 					available = 1
@@ -618,24 +939,34 @@ func (m Model) View() string {
 
 // renderTabBar builds the period tab bar (line 1) and date selector bar (line 2).
 func (m Model) renderTabBar() string {
-	// Line 1: period tabs
-	tabs := []struct {
-		label  string
-		period types.Period
-	}{
-		{"Daily", types.Daily},
-		{"Weekly", types.Weekly},
-		{"Monthly", types.Monthly},
+	// Line 1: period tabs + Categories
+	type tabDef struct {
+		label      string
+		period     types.Period
+		isCategory bool
+	}
+	tabs := []tabDef{
+		{"Daily", types.Daily, false},
+		{"Weekly", types.Weekly, false},
+		{"Monthly", types.Monthly, false},
+		{"Categories", 0, true},
 	}
 
 	var parts []string
 	var tabRegs []tabRegion
 	x := 0
 	for _, t := range tabs {
-		// Padding(0,1) adds 1 space each side, so rendered width = len(label) + 2
 		rendered := lipgloss.Width(t.label) + 2 // Padding(0,1) = 1 left + 1 right
-		tabRegs = append(tabRegs, tabRegion{xStart: x, xEnd: x + rendered, period: t.period})
-		if t.period == m.period {
+		tabRegs = append(tabRegs, tabRegion{xStart: x, xEnd: x + rendered, period: t.period, isCategory: t.isCategory})
+
+		isActive := false
+		if t.isCategory {
+			isActive = m.categoryMode || m.categorySelectMode
+		} else {
+			isActive = !m.categoryMode && !m.categorySelectMode && t.period == m.period
+		}
+
+		if isActive {
 			parts = append(parts, ActiveTabStyle.Render(t.label))
 		} else {
 			parts = append(parts, InactiveTabStyle.Render(t.label))
@@ -644,6 +975,12 @@ func (m Model) renderTabBar() string {
 	}
 	line1 := strings.Join(parts, "")
 	lastTabBarRegions = tabRegs
+
+	// In split pane mode, skip the date bar to maximize content space
+	if m.categorySelectMode {
+		lastDateBarRegions = nil
+		return line1
+	}
 
 	// Line 2: date selector bar
 	line2, regions := m.buildDateBar()
@@ -660,8 +997,14 @@ var lastDateBarRegions []dateRegion
 
 // buildDateBar builds the date selector bar and returns the rendered string and click regions.
 func (m Model) buildDateBar() (string, []dateRegion) {
+	if m.categorySelectMode {
+		return m.buildCategorySelectDateBar()
+	}
 	if m.searchResults {
 		return m.buildSearchPageBar()
+	}
+	if m.categoryMode {
+		return m.buildCategoryDateBar()
 	}
 
 	switch m.period {
@@ -706,6 +1049,100 @@ func (m Model) buildSearchPageBar() (string, []dateRegion) {
 	rightW := lipgloss.Width(right)
 	if m.searchHasNext {
 		regions = append(regions, dateRegion{xStart: x, xEnd: x + rightW, action: "search_next"})
+	}
+
+	return b.String(), regions
+}
+
+func (m Model) buildCategorySelectDateBar() (string, []dateRegion) {
+	var b strings.Builder
+	visible := m.catVisibleList()
+	total := len(types.AllCategories)
+	if m.catFilterMode || m.catFilterQuery != "" {
+		b.WriteString(DateItemActiveStyle.Render(fmt.Sprintf(" Filter: %s ", m.catFilterQuery)))
+		b.WriteString(DateItemStyle.Render(fmt.Sprintf(" (%d/%d) ", len(visible), total)))
+	} else {
+		b.WriteString(DateItemActiveStyle.Render(" Select a category "))
+		b.WriteString(DateItemStyle.Render(fmt.Sprintf(" (%d categories, / to filter) ", total)))
+	}
+	return b.String(), nil
+}
+
+func (m Model) buildCategoryDateBar() (string, []dateRegion) {
+	var regions []dateRegion
+	var b strings.Builder
+	x := 0
+	all := types.AllCategories
+
+	// Left arrow — navigate to previous category
+	left := "◀ "
+	b.WriteString(DateArrowStyle.Render(left))
+	leftW := lipgloss.Width(left)
+	if len(all) > 0 {
+		regions = append(regions, dateRegion{xStart: x, xEnd: x + leftW, action: "cat_prev"})
+	}
+	x += leftW
+
+	// Find the current category index
+	curIdx := types.CategoryIndexBySlug(m.categorySlug)
+	if curIdx < 0 {
+		curIdx = 0
+	}
+
+	// Calculate how many neighbor categories we can show within terminal width
+	// Reserve space for arrows (4 chars) and current category name
+	currentLabel := " " + m.categoryName + " "
+	currentLabelW := lipgloss.Width(currentLabel)
+	arrowSpace := 4 // "◀ " + " ▶"
+	availableWidth := m.width - arrowSpace - currentLabelW
+
+	// Collect neighbors to show (categories before and after current)
+	type neighborCat struct {
+		idx  int
+		cat  types.CategoryLink
+		side string // "before" or "after"
+	}
+	var beforeCats, afterCats []neighborCat
+
+	// Gather categories after current
+	for i := 1; i < len(all); i++ {
+		idx := (curIdx + i) % len(all)
+		afterCats = append(afterCats, neighborCat{idx: idx, cat: all[idx], side: "after"})
+	}
+
+	// Interleave: show after-cats that fit in the available width
+	var visibleAfter []neighborCat
+	usedWidth := 0
+	for _, nc := range afterCats {
+		catLabel := " " + nc.cat.Name() + " "
+		catW := lipgloss.Width(catLabel)
+		if usedWidth+catW > availableWidth {
+			break
+		}
+		visibleAfter = append(visibleAfter, nc)
+		usedWidth += catW
+	}
+	_ = beforeCats // not used currently — showing only forward neighbors
+
+	// Render current category (active)
+	b.WriteString(DateItemActiveStyle.Render(currentLabel))
+	x += currentLabelW
+
+	// Render visible neighbor categories
+	for _, nc := range visibleAfter {
+		catLabel := " " + nc.cat.Name() + " "
+		b.WriteString(DateItemStyle.Render(catLabel))
+		catWidth := lipgloss.Width(catLabel)
+		regions = append(regions, dateRegion{xStart: x, xEnd: x + catWidth, action: "cat_goto:" + nc.cat.Slug()})
+		x += catWidth
+	}
+
+	// Right arrow — navigate to next category
+	right := " ▶"
+	b.WriteString(DateArrowStyle.Render(right))
+	rightW := lipgloss.Width(right)
+	if len(all) > 0 {
+		regions = append(regions, dateRegion{xStart: x, xEnd: x + rightW, action: "cat_next"})
 	}
 
 	return b.String(), regions
@@ -908,28 +1345,57 @@ func (m Model) handleDateBarClick(r dateRegion) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, fetchSearchResults(m.source, m.searchQuery, targetPage, m.requestID))
 	}
 
+	// Handle category navigation actions
+	if strings.HasPrefix(r.action, "cat_") {
+		if m.source == nil {
+			return m, nil
+		}
+		all := types.AllCategories
+		var slug string
+		switch {
+		case r.action == "cat_prev":
+			if len(all) == 0 {
+				return m, nil
+			}
+			idx := types.CategoryIndexBySlug(m.categorySlug)
+			if idx < 0 {
+				idx = 0
+			}
+			idx--
+			if idx < 0 {
+				idx = len(all) - 1
+			}
+			slug = all[idx].Slug()
+		case r.action == "cat_next":
+			if len(all) == 0 {
+				return m, nil
+			}
+			idx := types.CategoryIndexBySlug(m.categorySlug)
+			if idx < 0 {
+				idx = 0
+			}
+			idx++
+			if idx >= len(all) {
+				idx = 0
+			}
+			slug = all[idx].Slug()
+		case strings.HasPrefix(r.action, "cat_goto:"):
+			slug = strings.TrimPrefix(r.action, "cat_goto:")
+		}
+		if slug == "" {
+			return m, nil
+		}
+		m.loading = true
+		m.statusMsg = "Loading category..."
+		m.requestID++
+		return m, tea.Batch(m.spinner.Tick, fetchCategoryProducts(m.source, slug, m.requestID))
+	}
+
 	switch r.action {
 	case "prev_month":
-		switch m.period {
-		case types.Daily:
-			// Go to previous month, keep same day if possible
-			prev := m.date.AddDate(0, -1, 0)
-			m.date = prev
-		case types.Weekly:
-			m.date = m.date.AddDate(0, -1, 0)
-		case types.Monthly:
-			m.date = m.date.AddDate(0, -1, 0)
-		}
+		m.date = m.date.AddDate(0, -1, 0)
 	case "next_month":
-		var next time.Time
-		switch m.period {
-		case types.Daily:
-			next = m.date.AddDate(0, 1, 0)
-		case types.Weekly:
-			next = m.date.AddDate(0, 1, 0)
-		case types.Monthly:
-			next = m.date.AddDate(0, 1, 0)
-		}
+		next := m.date.AddDate(0, 1, 0)
 		if next.After(time.Now()) {
 			return m, nil
 		}
@@ -1018,22 +1484,18 @@ func (m Model) renderProductList() string {
 }
 
 func renderProductItem(product types.Product, isSelected bool, width int) string {
-	// Line 1
+	// Line 1: Rank + Name + Votes
 	rankStr := fmt.Sprintf("#%-2d", product.Rank())
 	nameStr := product.Name()
 	voteDisplay := fmt.Sprintf("▲ %s", formatVoteCount(product.VoteCount()))
 
-	rankWidth := 4
-	voteWidth := len(voteDisplay) + 1
+	rankWidth := lipgloss.Width(rankStr)
+	voteWidth := lipgloss.Width(voteDisplay) + 1
 	availableForName := width - rankWidth - voteWidth
 	if availableForName <= 1 {
 		availableForName = 0
 	}
-	if availableForName > 0 && len(nameStr) > availableForName {
-		nameStr = nameStr[:availableForName-1] + "…"
-	} else if availableForName > len(nameStr) {
-		nameStr = nameStr + strings.Repeat(" ", availableForName-len(nameStr))
-	}
+	nameStr = padOrTruncate(nameStr, availableForName)
 
 	var line1 string
 	if isSelected {
@@ -1048,28 +1510,24 @@ func renderProductItem(product types.Product, isSelected bool, width int) string
 		line1 = lipgloss.JoinHorizontal(lipgloss.Left, rankStyle.Render(rankStr), nameStyle.Render(nameStr), voteStyle.Render(voteDisplay))
 	}
 
-	// Line 2
+	// Line 2: Tagline
 	tagline := product.Tagline()
 	taglineIndent := "    "
-	taglineAvailable := width - len(taglineIndent)
+	taglineAvailable := width - lipgloss.Width(taglineIndent)
 	if taglineAvailable < 0 {
 		taglineAvailable = 0
 	}
-	if len(tagline) > taglineAvailable {
-		tagline = tagline[:taglineAvailable-3] + "…"
-	}
+	tagline = truncateToWidth(tagline, taglineAvailable)
 	line2 := taglineIndent + lipgloss.NewStyle().Foreground(DraculaForeground).Render(tagline)
 
-	// Line 3
+	// Line 3: Categories
 	categoryStr := strings.Join(product.Categories(), " • ")
 	categoryIndent := "    "
-	categoryAvailable := width - len(categoryIndent)
+	categoryAvailable := width - lipgloss.Width(categoryIndent)
 	if categoryAvailable < 0 {
 		categoryAvailable = 0
 	}
-	if len(categoryStr) > categoryAvailable {
-		categoryStr = categoryStr[:categoryAvailable-3] + "…"
-	}
+	categoryStr = truncateToWidth(categoryStr, categoryAvailable)
 	line3 := categoryIndent + lipgloss.NewStyle().Foreground(DraculaComment).Render(categoryStr)
 
 	output := line1 + "\n" + line2 + "\n" + line3
@@ -1163,8 +1621,15 @@ func (m Model) renderDetailContent() string {
 	}
 
 	if len(d.Categories()) > 0 {
+		catStyle := lipgloss.NewStyle().Foreground(DraculaCyan).Underline(true)
 		b.WriteString("\nCategories: ")
-		b.WriteString(strings.Join(d.Categories(), " • "))
+		for i, cat := range d.Categories() {
+			if i > 0 {
+				b.WriteString(" • ")
+			}
+			b.WriteString(catStyle.Render(cat))
+		}
+		b.WriteString("  (press 4 to browse categories)")
 		b.WriteString("\n")
 	}
 
@@ -1202,4 +1667,359 @@ func (m *Model) resizePanes() {
 	m.list.SetSize(m.width, listHeight)
 	m.viewport.Width = m.width
 	m.viewport.Height = detailHeight
+}
+
+// truncateToWidth truncates a string to fit within maxWidth display columns,
+// appending "…" if truncated. Uses rune-aware iteration to avoid cutting
+// multibyte characters (Korean, Japanese, emoji, etc.) mid-sequence.
+func truncateToWidth(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= maxWidth {
+		return s
+	}
+	// Need to truncate — reserve 1 column for "…"
+	target := maxWidth - 1
+	if target <= 0 {
+		return "…"
+	}
+	var result strings.Builder
+	currentWidth := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if currentWidth+rw > target {
+			break
+		}
+		result.WriteRune(r)
+		currentWidth += rw
+	}
+	result.WriteString("…")
+	return result.String()
+}
+
+// padOrTruncate pads the string with spaces to exactly targetWidth display columns,
+// or truncates with "…" if it exceeds targetWidth.
+func padOrTruncate(s string, targetWidth int) string {
+	w := lipgloss.Width(s)
+	if w > targetWidth {
+		return truncateToWidth(s, targetWidth)
+	}
+	if w < targetWidth {
+		return s + strings.Repeat(" ", targetWidth-w)
+	}
+	return s
+}
+
+// switchToLeaderboard resets category/split-pane state and fetches the leaderboard for the given period.
+func (m *Model) switchToLeaderboard(period types.Period) (tea.Model, tea.Cmd) {
+	m.categoryMode = false
+	m.categorySelectMode = false
+	m.splitLoading = false
+	m.splitRequestID = 0
+	m.period = period
+	m.state = ListView
+	m.loading = true
+	m.statusMsg = "Loading..."
+	if m.source == nil {
+		return *m, nil
+	}
+	m.requestID++
+	return *m, tea.Batch(m.spinner.Tick, fetchLeaderboard(m.source, m.period, m.date, m.requestID))
+}
+
+// slugToDisplayName converts a category slug like "ai-agents" to "AI Agents".
+func slugToDisplayName(slug string) string {
+	words := strings.Split(slug, "-")
+	for i, w := range words {
+		if w == "ai" || w == "llm" || w == "llms" || w == "api" || w == "saas" {
+			words[i] = strings.ToUpper(w)
+		} else if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// enterCategorySelectMode switches to the split pane mode and returns a Cmd to load the initial category.
+func (m *Model) enterCategorySelectMode() tea.Cmd {
+	m.categorySelectMode = true
+	m.catFilterMode = false
+	m.catFilterQuery = ""
+	m.catFilteredIndices = nil
+	m.splitFocus = 0
+	m.splitProducts = nil
+	m.splitSelected = 0
+	m.splitLoading = false
+	m.splitSlug = ""
+	m.splitRequestID = 0
+	// If we were viewing a category, position cursor there
+	if m.categorySlug != "" {
+		idx := types.CategoryIndexBySlug(m.categorySlug)
+		if idx >= 0 {
+			m.catSelectIdx = idx
+		}
+	}
+	m.statusMsg = fmt.Sprintf("Select a category (%d categories)", len(types.AllCategories))
+	// Trigger initial load for the selected category
+	return m.loadSelectedCategory()
+}
+
+// loadSelectedCategory triggers a fetch for the currently selected category in the left pane.
+func (m *Model) loadSelectedCategory() tea.Cmd {
+	visible := m.catVisibleList()
+	if len(visible) == 0 || m.catSelectIdx >= len(visible) || m.source == nil {
+		return nil
+	}
+	catIdx := visible[m.catSelectIdx]
+	slug := types.AllCategories[catIdx].Slug()
+	if slug == m.splitSlug {
+		return nil // already loaded
+	}
+	m.splitLoading = true
+	m.requestID++
+	m.splitRequestID = m.requestID
+	return tea.Batch(m.spinner.Tick, fetchCategoryProducts(m.source, slug, m.requestID))
+}
+
+// catVisibleList returns the list of AllCategories indices to show.
+// allCategoryIndices is a pre-computed slice [0, 1, 2, ..., len(AllCategories)-1]
+// to avoid allocating a new slice on every catVisibleList call.
+var allCategoryIndices = func() []int {
+	indices := make([]int, len(types.AllCategories))
+	for i := range indices {
+		indices[i] = i
+	}
+	return indices
+}()
+
+// catVisibleList returns the list of AllCategories indices to show.
+// When filtering, returns only matching indices; otherwise all indices.
+func (m Model) catVisibleList() []int {
+	if m.catFilterMode || m.catFilterQuery != "" {
+		if len(m.catFilteredIndices) > 0 {
+			return m.catFilteredIndices
+		}
+		return nil
+	}
+	return allCategoryIndices
+}
+
+// updateCatFilter updates the filtered category indices based on the query.
+func (m *Model) updateCatFilter() {
+	if m.catFilterQuery == "" {
+		m.catFilteredIndices = nil
+		return
+	}
+	query := strings.ToLower(m.catFilterQuery)
+	m.catFilteredIndices = nil
+	for i, cat := range types.AllCategories {
+		if strings.Contains(strings.ToLower(cat.Name()), query) || strings.Contains(cat.Slug(), query) {
+			m.catFilteredIndices = append(m.catFilteredIndices, i)
+		}
+	}
+	// Reset cursor if out of range
+	if m.catSelectIdx >= len(m.catFilteredIndices) {
+		m.catSelectIdx = 0
+	}
+}
+
+// renderSplitPane renders the left (categories) + right (products) split layout.
+func (m Model) renderSplitPane() string {
+	available := m.height - 3 // tab + status + help (no date bar in split mode)
+	if available < 1 {
+		available = 1
+	}
+
+	// Calculate pane widths
+	leftWidth := m.width * 30 / 100
+	if leftWidth < 20 {
+		leftWidth = 20
+	}
+	if leftWidth > 35 {
+		leftWidth = 35
+	}
+	sepWidth := 1 // "│"
+	rightWidth := m.width - leftWidth - sepWidth
+	if rightWidth < 30 {
+		rightWidth = 30
+	}
+
+	leftContent := m.renderCategoryPane(leftWidth, available)
+	rightContent := m.renderProductPane(rightWidth, available)
+
+	// Join panes line by line
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+
+	sepStyle := lipgloss.NewStyle().Foreground(DraculaComment)
+
+	var result strings.Builder
+	for i := 0; i < available; i++ {
+		left := ""
+		if i < len(leftLines) {
+			left = leftLines[i]
+		}
+		// Pad left to leftWidth
+		leftVisual := lipgloss.Width(left)
+		if leftVisual < leftWidth {
+			left += strings.Repeat(" ", leftWidth-leftVisual)
+		}
+
+		right := ""
+		if i < len(rightLines) {
+			right = rightLines[i]
+		}
+
+		result.WriteString(left)
+		result.WriteString(sepStyle.Render("│"))
+		result.WriteString(right)
+		if i < available-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
+// renderCategoryPane renders the left pane with the category list.
+func (m Model) renderCategoryPane(width, height int) string {
+	visible := m.catVisibleList()
+	if len(visible) == 0 {
+		emptyText := "No categories"
+		if m.catFilterQuery != "" {
+			emptyText = "No match"
+		}
+		msg := lipgloss.NewStyle().Foreground(DraculaComment).Render(emptyText)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, msg)
+	}
+
+	visibleCount := height
+	if visibleCount < 1 {
+		visibleCount = 1
+	}
+
+	sel := m.catSelectIdx
+	if sel >= len(visible) {
+		sel = len(visible) - 1
+	}
+	if sel < 0 {
+		sel = 0
+	}
+
+	start := 0
+	if sel >= visibleCount {
+		start = sel - visibleCount + 1
+	}
+	end := start + visibleCount
+	if end > len(visible) {
+		end = len(visible)
+		start = end - visibleCount
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	isLeftFocused := m.splitFocus == 0
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		catIdx := visible[i]
+		cat := types.AllCategories[catIdx]
+		isSelected := i == sel
+
+		name := cat.Name()
+		// Truncate name if too long for pane (display-width aware)
+		maxName := width - 3 // padding/border space
+		if maxName < 5 {
+			maxName = 5
+		}
+		name = truncateToWidth(name, maxName)
+
+		if isSelected && isLeftFocused {
+			line := lipgloss.NewStyle().
+				Foreground(DraculaPink).Bold(true).
+				BorderLeft(true).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(DraculaPink).
+				PaddingLeft(1).
+				Render(name)
+			b.WriteString(line)
+		} else if isSelected {
+			// Selected but not focused — dim highlight
+			line := lipgloss.NewStyle().
+				Foreground(DraculaPink).
+				PaddingLeft(2).
+				Render(name)
+			b.WriteString(line)
+		} else {
+			line := lipgloss.NewStyle().
+				Foreground(DraculaComment).
+				PaddingLeft(2).
+				Render(name)
+			b.WriteString(line)
+		}
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+// renderProductPane renders the right pane with the product list for the selected category.
+func (m Model) renderProductPane(width, height int) string {
+	if m.splitLoading {
+		spin := m.spinner.View() + " Loading..."
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, spin)
+	}
+
+	if len(m.splitProducts) == 0 {
+		emptyText := "Select a category"
+		if m.splitSlug != "" {
+			emptyText = "No products"
+		}
+		msg := lipgloss.NewStyle().Foreground(DraculaComment).Render(emptyText)
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, msg)
+	}
+
+	isRightFocused := m.splitFocus == 1
+	itemHeight := 3
+	visibleCount := height / itemHeight
+	if visibleCount < 1 {
+		visibleCount = 1
+	}
+
+	sel := m.splitSelected
+	if sel >= len(m.splitProducts) {
+		sel = len(m.splitProducts) - 1
+	}
+	if sel < 0 {
+		sel = 0
+	}
+
+	start := 0
+	if sel >= visibleCount {
+		start = sel - visibleCount + 1
+	}
+	end := start + visibleCount
+	if end > len(m.splitProducts) {
+		end = len(m.splitProducts)
+		start = end - visibleCount
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		isSelected := i == sel && isRightFocused
+		b.WriteString(renderProductItem(m.splitProducts[i], isSelected, width))
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
 }

@@ -7,8 +7,9 @@ Product Hunt TUI - browse the Product Hunt leaderboard from your terminal.
 ## Features
 
 - Browse Daily / Weekly / Monthly leaderboards
+- Browse by category (248 categories with search/filter)
 - Clickable date navigation bar (mouse support)
-- Product detail view with ratings, reviews, and links
+- Product detail view with ratings, reviews, pros/cons, pricing, and links
 - Open products in your browser with `o`
 - Vim-style keyboard navigation
 - Dracula color theme (16-color ANSI)
@@ -50,10 +51,10 @@ phtui
 | `j` / `k` | Navigate up/down |
 | `Enter` | View product detail |
 | `Esc` | Back to list |
-| `Tab` | Cycle period (Daily/Weekly/Monthly) |
-| `1` `2` `3` | Switch to Daily/Weekly/Monthly |
-| `h` / `l` | Previous/next date |
-| `/` | Global product search |
+| `Tab` | Cycle period (Daily/Weekly/Monthly/Categories) |
+| `1` `2` `3` `4` | Switch to Daily/Weekly/Monthly/Categories |
+| `h` / `l` | Previous/next date (or category) |
+| `/` | Search (global product search, or filter categories) |
 | `o` | Open in browser |
 | `r` | Refresh |
 | `?` | Toggle help |
@@ -61,6 +62,7 @@ phtui
 
 Mouse clicks are supported on the period tabs and date bar.
 Use `/` to open search input, type a query, then press `Enter` to run global search.
+Press `4` or `Tab` to open the category selector, browse with `j`/`k`, and press `Enter` to view products. Use `/` to filter categories by name.
 
 ## Architecture
 

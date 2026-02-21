@@ -169,10 +169,26 @@ func (pd ProductDetail) PricingInfo() string     { return pd.pricingInfo }
 
 type LeaderboardEntry = Product
 
+// CategoryLink represents a link to a product category.
+type CategoryLink struct {
+	name string
+	slug string
+}
+
+// NewCategoryLink creates a new CategoryLink
+func NewCategoryLink(name, slug string) CategoryLink {
+	return CategoryLink{name: name, slug: slug}
+}
+
+// Getters for CategoryLink fields
+func (c CategoryLink) Name() string { return c.name }
+func (c CategoryLink) Slug() string { return c.slug }
+
 // ProductSource is the core abstraction for data access.
 // Sync methods only — no bubbletea dependency.
 // Future: MCP server, CLI can call these directly.
 type ProductSource interface {
 	GetLeaderboard(period Period, date time.Time) ([]Product, error)
 	GetProductDetail(slug string) (ProductDetail, error)
+	GetCategoryProducts(slug string) ([]Product, []CategoryLink, error)
 }

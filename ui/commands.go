@@ -77,3 +77,24 @@ func fetchSearchResults(source types.ProductSource, query string, page int, requ
 		}
 	}
 }
+
+type categoryProductsMsg struct {
+	requestID  int
+	slug       string
+	products   []types.Product
+	categories []types.CategoryLink
+	err        error
+}
+
+func fetchCategoryProducts(source types.ProductSource, slug string, requestID int) tea.Cmd {
+	return func() tea.Msg {
+		products, categories, err := source.GetCategoryProducts(slug)
+		return categoryProductsMsg{
+			requestID:  requestID,
+			slug:       slug,
+			products:   products,
+			categories: categories,
+			err:        err,
+		}
+	}
+}

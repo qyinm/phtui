@@ -48,14 +48,11 @@ func New() *Scraper {
 func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.Product, error) {
 	url := baseURL + period.URLPath(date)
 
-	s.mu.Lock()
-	if cached, ok := s.cache[url]; ok {
-		s.mu.Unlock()
-		if products, ok := cached.value.([]types.Product); ok {
+	if val, ok := s.getCached(url); ok {
+		if products, ok := val.([]types.Product); ok {
 			return products, nil
 		}
 	}
-	s.mu.Unlock()
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -78,9 +75,7 @@ func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.P
 		return nil, fmt.Errorf("parse leaderboard: %w", err)
 	}
 
-	s.mu.Lock()
-	s.cache[url] = cachedResult{value: products, timestamp: time.Now()}
-	s.mu.Unlock()
+	s.setCache(url, products)
 	return products, nil
 }
 
@@ -88,18 +83,12 @@ func (s *Scraper) GetLeaderboard(period types.Period, date time.Time) ([]types.P
 func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 	url := baseURL + "/products/" + slug
 
-	// Check cache
-	s.mu.Lock()
-	if cached, ok := s.cache[url]; ok {
-		s.mu.Unlock()
-		detail, ok := cached.value.(types.ProductDetail)
-		if ok {
+	if val, ok := s.getCached(url); ok {
+		if detail, ok := val.(types.ProductDetail); ok {
 			return detail, nil
 		}
 	}
-	s.mu.Unlock()
 
-	// HTTP GET
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return types.ProductDetail{}, fmt.Errorf("create request: %w", err)
@@ -124,11 +113,7 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 		return types.ProductDetail{}, fmt.Errorf("parse product detail: %w", err)
 	}
 
-	// Cache result
-	s.mu.Lock()
-	s.cache[url] = cachedResult{value: detail, timestamp: time.Now()}
-	s.mu.Unlock()
-
+	s.setCache(url, detail)
 	return detail, nil
 }
 
@@ -192,17 +177,13 @@ func (s *Scraper) SearchProductsPage(query string, page int) ([]types.Product, i
 	escaped := url.QueryEscape(query)
 	searchURL := fmt.Sprintf("%s/search?q=%s&page=%d", baseURL, escaped, page)
 
-	s.mu.Lock()
-	if cached, ok := s.cache[searchURL]; ok {
-		s.mu.Unlock()
-		if searchCached, ok := cached.value.(searchPageCache); ok {
+	if val, ok := s.getCached(searchURL); ok {
+		if searchCached, ok := val.(searchPageCache); ok {
 			return searchCached.products, searchCached.page, searchCached.hasPrev, searchCached.hasNext, searchCached.pagesCount, nil
 		}
-		if products, ok := cached.value.([]types.Product); ok {
+		if products, ok := val.([]types.Product); ok {
 			return products, page, page > 1, len(products) >= searchPageSize, page, nil
 		}
-	} else {
-		s.mu.Unlock()
 	}
 
 	req, err := http.NewRequest("GET", searchURL, nil)
@@ -238,18 +219,13 @@ func (s *Scraper) SearchProductsPage(query string, page int) ([]types.Product, i
 		pagesCount = 0
 	}
 
-	s.mu.Lock()
-	s.cache[searchURL] = cachedResult{
-		value: searchPageCache{
-			products:   products,
-			page:       currentPage,
-			hasPrev:    hasPrev,
-			hasNext:    hasNext,
-			pagesCount: pagesCount,
-		},
-		timestamp: time.Now(),
-	}
-	s.mu.Unlock()
+	s.setCache(searchURL, searchPageCache{
+		products:   products,
+		page:       currentPage,
+		hasPrev:    hasPrev,
+		hasNext:    hasNext,
+		pagesCount: pagesCount,
+	})
 
 	return products, currentPage, hasPrev, hasNext, pagesCount, nil
 }
@@ -260,6 +236,63 @@ type searchPageCache struct {
 	hasPrev    bool
 	hasNext    bool
 	pagesCount int
+}
+
+// GetCategoryProducts fetches and parses a Product Hunt category page.
+func (s *Scraper) GetCategoryProducts(slug string) ([]types.Product, []types.CategoryLink, error) {
+	categoryURL := baseURL + "/categories/" + slug
+
+	if val, ok := s.getCached(categoryURL); ok {
+		if result, ok := val.(categoryCache); ok {
+			return result.products, result.categories, nil
+		}
+	}
+
+	req, err := http.NewRequest("GET", categoryURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch category: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	products, categories, err := ParseCategoryProducts(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse category: %w", err)
+	}
+
+	s.setCache(categoryURL, categoryCache{products: products, categories: categories})
+	return products, categories, nil
+}
+
+type categoryCache struct {
+	products   []types.Product
+	categories []types.CategoryLink
+}
+
+// getCached retrieves a cached value by key, returning (value, true) if found.
+func (s *Scraper) getCached(key string) (any, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.cache[key]; ok {
+		return cached.value, true
+	}
+	return nil, false
+}
+
+// setCache stores a value in the cache under the given key.
+func (s *Scraper) setCache(key string, value any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache[key] = cachedResult{value: value, timestamp: time.Now()}
 }
 
 // ClearCache clears the in-memory cache.
