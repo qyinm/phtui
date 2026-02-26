@@ -271,6 +271,21 @@ func TestAuthMiddlewareSuccess(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareLowercaseBearerSuccess(t *testing.T) {
+	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
+	defer srv.Close()
+
+	headers := map[string]string{"Authorization": "bearer secret"}
+	resp, err := postInitialize(srv.URL+"/mcp", headers)
+	if err != nil {
+		t.Fatalf("initialize request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestAuthMiddlewareXAPIKeySuccess(t *testing.T) {
 	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
 	defer srv.Close()
@@ -362,6 +377,29 @@ func TestRateLimitMiddleware(t *testing.T) {
 	defer resp1.Body.Close()
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("expected first request 200, got %d", resp1.StatusCode)
+	}
+
+	resp2, err := postInitialize(srv.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected second request 429, got %d", resp2.StatusCode)
+	}
+}
+
+func TestUnauthorizedRequestsAreRateLimited(t *testing.T) {
+	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 1, Burst: 1}, &ServerOptions{})
+	defer srv.Close()
+
+	resp1, err := postInitialize(srv.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected first request 401, got %d", resp1.StatusCode)
 	}
 
 	resp2, err := postInitialize(srv.URL+"/mcp", nil)

@@ -46,16 +46,16 @@ func WrapMCPHandler(next http.Handler, cfg Config) http.Handler {
 			}
 		}
 
+		if !limiter.Allow() {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
 		if cfg.APIKey != "" {
 			if !validAPIKey(r, cfg.APIKey) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-		}
-
-		if !limiter.Allow() {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return
 		}
 
 		next.ServeHTTP(w, r)
@@ -71,11 +71,14 @@ func validAPIKey(r *http.Request, expected string) bool {
 	if auth == "" {
 		return false
 	}
-	prefix := "Bearer "
-	if !strings.HasPrefix(auth, prefix) {
+	parts := strings.Fields(auth)
+	if len(parts) != 2 {
 		return false
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+	if !strings.EqualFold(parts[0], "Bearer") {
+		return false
+	}
+	token := strings.TrimSpace(parts[1])
 	return secureEqual(token, expected)
 }
 
