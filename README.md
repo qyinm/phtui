@@ -2,6 +2,8 @@
 
 Product Hunt TUI - browse the Product Hunt leaderboard from your terminal.
 
+![phtui logo](assets/logo.png)
+
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)
 
 ## Features
