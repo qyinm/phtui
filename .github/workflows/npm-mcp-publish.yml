@@ -74,6 +74,7 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_SECRET_TOKEN: ${{ secrets.NPM_SECRET }}
+          NPT_TOKEN: ${{ secrets.NPT_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -82,7 +83,10 @@ jobs:
             token="${NPM_SECRET_TOKEN:-}"
           fi
           if [[ -z "$token" ]]; then
-            echo "Missing npm token. Set repository secret NPM_TOKEN (preferred) or NPM_SECRET."
+            token="${NPT_TOKEN:-}"
+          fi
+          if [[ -z "$token" ]]; then
+            echo "Missing npm token. Set repository secret NPM_TOKEN (preferred), NPM_SECRET, or NPT_TOKEN."
             exit 1
           fi
 
