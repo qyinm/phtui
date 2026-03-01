@@ -68,15 +68,16 @@ jobs:
           cd "${PACKAGE_DIR}"
           npm pack --dry-run
 
-      - name: Publish to npm
+      - name: Resolve npm token
+        id: resolve_token
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_SECRET_TOKEN: ${{ secrets.NPM_SECRET }}
         run: |
           set -euo pipefail
 
-          token="${NODE_AUTH_TOKEN:-}"
+          token="${NPM_TOKEN:-}"
           if [[ -z "$token" ]]; then
             token="${NPM_SECRET_TOKEN:-}"
           fi
@@ -85,6 +86,13 @@ jobs:
             exit 1
           fi
 
-          export NODE_AUTH_TOKEN="$token"
-          cd "${PACKAGE_DIR}"
-          npm publish --access public --provenance
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm
+        uses: JS-DevTools/npm-publish@v4
+        with:
+          token: ${{ steps.resolve_token.outputs.token }}
+          package: ./npm/phtui-mcp
+          access: public
+          provenance: true
