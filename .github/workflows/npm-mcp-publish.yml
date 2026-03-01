@@ -72,7 +72,19 @@ jobs:
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_SECRET_TOKEN: ${{ secrets.NPM_SECRET }}
         run: |
           set -euo pipefail
+
+          token="${NODE_AUTH_TOKEN:-}"
+          if [[ -z "$token" ]]; then
+            token="${NPM_SECRET_TOKEN:-}"
+          fi
+          if [[ -z "$token" ]]; then
+            echo "Missing npm token. Set repository secret NPM_TOKEN (preferred) or NPM_SECRET."
+            exit 1
+          fi
+
+          export NODE_AUTH_TOKEN="$token"
           cd "${PACKAGE_DIR}"
           npm publish --access public --provenance
