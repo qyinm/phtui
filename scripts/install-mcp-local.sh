@@ -3,7 +3,7 @@
 set -euo pipefail
 
 NAME="${PHTUI_MCP_NAME:-phtui-local}"
-NPX_CMD="${PHTUI_MCP_NPX_CMD:-npx -y @qyinm/phtui-mcp}"
+NPX_CMD="${PHTUI_MCP_NPX_CMD:-npx -y @qxinm/phtui-mcp}"
 SETUP_CODEX=true
 SETUP_CLAUDE=true
 
@@ -16,7 +16,7 @@ Usage:
 
 Options:
   --name <name>      MCP server name (default: phtui-local)
-  --npx-cmd <cmd>    Local stdio command (default: npx -y @qyinm/phtui-mcp)
+  --npx-cmd <cmd>    Local stdio command (default: npx -y @qxinm/phtui-mcp)
   --codex-only       Configure Codex only
   --claude-only      Configure Claude Code only
   --help             Show this help

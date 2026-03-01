@@ -107,20 +107,20 @@ Options:
 ./scripts/install-mcp-local.sh --codex-only
 ./scripts/install-mcp-local.sh --claude-only
 ./scripts/install-mcp-local.sh --name phtui-local
-./scripts/install-mcp-local.sh --npx-cmd "npx -y @qyinm/phtui-mcp"
+./scripts/install-mcp-local.sh --npx-cmd "npx -y @qxinm/phtui-mcp"
 ```
 
 ### Codex (local)
 
 ```bash
 codex mcp remove phtui-local
-codex mcp add phtui-local -- npx -y @qyinm/phtui-mcp
+codex mcp add phtui-local -- npx -y @qxinm/phtui-mcp
 ```
 
 ### Claude Code (local)
 
 ```bash
-claude mcp add phtui-local -- npx -y @qyinm/phtui-mcp
+claude mcp add phtui-local -- npx -y @qxinm/phtui-mcp
 ```
 
 ### OpenCode (local)
@@ -133,7 +133,7 @@ Add this to your OpenCode config (`opencode.json` / `opencode.jsonc`):
   "mcp": {
     "phtui": {
       "type": "local",
-      "command": ["npx", "-y", "@qyinm/phtui-mcp"],
+      "command": ["npx", "-y", "@qxinm/phtui-mcp"],
       "enabled": true
     }
   }
