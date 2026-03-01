@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Local stdio MCP launcher for phtui",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qyinm/phtui"
+  },
   "type": "module",
   "bin": {
     "phtui-mcp": "bin/phtui-mcp.mjs"
