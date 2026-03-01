@@ -11,7 +11,6 @@ import (
 
 type Config struct {
 	Port               string
-	APIKey             string
 	AllowedOrigins     []string
 	Stateless          bool
 	EnableSearch       bool
@@ -30,7 +29,6 @@ func LoadConfig() Config {
 
 	cfg := Config{
 		Port:               port,
-		APIKey:             strings.TrimSpace(os.Getenv("PHTUI_MCP_API_KEY")),
 		AllowedOrigins:     parseCSV(os.Getenv("PHTUI_MCP_ALLOWED_ORIGINS")),
 		Stateless:          parseBool(os.Getenv("PHTUI_MCP_STATELESS"), false),
 		EnableSearch:       parseBool(os.Getenv("PHTUI_MCP_ENABLE_SEARCH"), false),

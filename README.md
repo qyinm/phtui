@@ -79,24 +79,7 @@ Built with [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](ht
 
 ## MCP Server
 
-v1 is local-first. Run MCP server on localhost and connect agents to it.
-
-Run:
-
-```bash
-PORT=8080 go run ./cmd/phtui-mcp
-```
-
-Endpoints:
-
-- MCP: `http://localhost:8080/mcp`
-- Health: `http://localhost:8080/healthz`
-
-Quick local test:
-
-```bash
-curl -i http://localhost:8080/healthz
-```
+v1 is developer-friendly local mode only (stdio command). No hosted endpoint is required.
 
 Core tools enabled by default (v1):
 
@@ -108,7 +91,7 @@ Core tools enabled by default (v1):
 Optional tools (off by default):
 
 - `search_products` (`PHTUI_MCP_ENABLE_SEARCH=true`)
-- `cache_clear` (`PHTUI_MCP_ENABLE_ADMIN=true` and `PHTUI_MCP_API_KEY` set)
+- `cache_clear` (`PHTUI_MCP_ENABLE_ADMIN=true`)
 
 Local client setup examples:
 
@@ -123,38 +106,53 @@ Options:
 ```bash
 ./scripts/install-mcp-local.sh --codex-only
 ./scripts/install-mcp-local.sh --claude-only
-./scripts/install-mcp-local.sh --name phtui-local --url http://localhost:8080/mcp
+./scripts/install-mcp-local.sh --name phtui-local
+./scripts/install-mcp-local.sh --npx-cmd "npx -y @qyinm/phtui-mcp"
 ```
 
 ### Codex (local)
 
 ```bash
 codex mcp remove phtui-local
-codex mcp add phtui-local --url http://localhost:8080/mcp
+codex mcp add phtui-local -- npx -y @qyinm/phtui-mcp
 ```
 
 ### Claude Code (local)
 
 ```bash
-claude mcp add -t http phtui-local http://localhost:8080/mcp
+claude mcp add phtui-local -- npx -y @qyinm/phtui-mcp
+```
+
+### OpenCode (local)
+
+Add this to your OpenCode config (`opencode.json` / `opencode.jsonc`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "phtui": {
+      "type": "local",
+      "command": ["npx", "-y", "@qyinm/phtui-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Development fallback (without npm publish)
+
+```bash
+go run ./cmd/phtui-mcp-stdio
 ```
 
 Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | HTTP listen port |
-| `PHTUI_MCP_API_KEY` | empty | Enables auth when set (`Authorization: Bearer <key>` or `X-API-Key`) |
-| `PHTUI_MCP_ALLOWED_ORIGINS` | empty | Comma-separated allowed `Origin` values |
-| `PHTUI_MCP_STATELESS` | `false` | Stateless streamable mode (`GET /mcp` returns `405`) |
 | `PHTUI_MCP_ENABLE_SEARCH` | `false` | Enable `search_products` tool |
-| `PHTUI_MCP_ENABLE_ADMIN` | `false` | Enable admin tool `cache_clear` (requires API key) |
-| `PHTUI_MCP_RPS` | `2` | Global rate-limit tokens per second |
-| `PHTUI_MCP_BURST` | `5` | Global rate-limit burst |
-| `PHTUI_MCP_SESSION_TIMEOUT` | `15m` | Stateful session idle timeout |
+| `PHTUI_MCP_ENABLE_ADMIN` | `false` | Enable admin tool `cache_clear` |
 | `PHTUI_MCP_CACHE_CLEAR_INTERVAL` | `30m` | Periodic scraper cache clear; `0` disables |
-
-Remote deployment is optional and out of v1 scope. If you deploy publicly, enable `PHTUI_MCP_API_KEY` and use Bearer auth.
 
 ## License
 

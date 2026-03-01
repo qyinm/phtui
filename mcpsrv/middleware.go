@@ -1,7 +1,6 @@
 package mcpsrv
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 	"sync"
@@ -39,7 +38,7 @@ func WrapMCPHandler(next http.Handler, cfg Config) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-API-Key, Mcp-Protocol-Version, Mcp-Session-Id")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -51,42 +50,8 @@ func WrapMCPHandler(next http.Handler, cfg Config) http.Handler {
 			return
 		}
 
-		if cfg.APIKey != "" {
-			if !validAPIKey(r, cfg.APIKey) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
 		next.ServeHTTP(w, r)
 	})
-}
-
-func validAPIKey(r *http.Request, expected string) bool {
-	apiKey := strings.TrimSpace(r.Header.Get("X-API-Key"))
-	if secureEqual(apiKey, expected) {
-		return true
-	}
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	if auth == "" {
-		return false
-	}
-	parts := strings.Fields(auth)
-	if len(parts) != 2 {
-		return false
-	}
-	if !strings.EqualFold(parts[0], "Bearer") {
-		return false
-	}
-	token := strings.TrimSpace(parts[1])
-	return secureEqual(token, expected)
-}
-
-func secureEqual(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 type tokenBucket struct {

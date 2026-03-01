@@ -208,7 +208,7 @@ func TestAdminCacheClearGating(t *testing.T) {
 		t.Fatalf("cache_clear should be absent when admin disabled")
 	}
 
-	srvWith := startTestServer(src, Config{}, &ServerOptions{EnableAdmin: true, APIKey: "secret"})
+	srvWith := startTestServer(src, Config{}, &ServerOptions{EnableAdmin: true})
 	defer srvWith.Close()
 	sessionWith := connectTestClient(t, ctx, srvWith.URL+"/mcp")
 	toolsWith, err := sessionWith.ListTools(ctx, nil)
@@ -224,7 +224,7 @@ func TestAdminCacheClearGating(t *testing.T) {
 func TestAdminCacheClearCallsSource(t *testing.T) {
 	ctx := context.Background()
 	src := newFakeSource()
-	srv := startTestServer(src, Config{}, &ServerOptions{EnableAdmin: true, APIKey: "secret"})
+	srv := startTestServer(src, Config{}, &ServerOptions{EnableAdmin: true})
 	defer srv.Close()
 
 	session := connectTestClient(t, ctx, srv.URL+"/mcp")
@@ -239,80 +239,6 @@ func TestAdminCacheClearCallsSource(t *testing.T) {
 	}
 	if !src.cleared {
 		t.Fatalf("expected source.ClearCache to be called")
-	}
-}
-
-func TestAuthMiddleware(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
-	defer srv.Close()
-
-	resp, err := postInitialize(srv.URL+"/mcp", nil)
-	if err != nil {
-		t.Fatalf("initialize request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthMiddlewareSuccess(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
-	defer srv.Close()
-
-	headers := map[string]string{"Authorization": "Bearer secret"}
-	resp, err := postInitialize(srv.URL+"/mcp", headers)
-	if err != nil {
-		t.Fatalf("initialize request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthMiddlewareLowercaseBearerSuccess(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
-	defer srv.Close()
-
-	headers := map[string]string{"Authorization": "bearer secret"}
-	resp, err := postInitialize(srv.URL+"/mcp", headers)
-	if err != nil {
-		t.Fatalf("initialize request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthMiddlewareXAPIKeySuccess(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
-	defer srv.Close()
-
-	headers := map[string]string{"X-API-Key": "secret"}
-	resp, err := postInitialize(srv.URL+"/mcp", headers)
-	if err != nil {
-		t.Fatalf("initialize request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthMiddlewareMalformedBearer(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 100, Burst: 100}, &ServerOptions{})
-	defer srv.Close()
-
-	headers := map[string]string{"Authorization": "Bearer"}
-	resp, err := postInitialize(srv.URL+"/mcp", headers)
-	if err != nil {
-		t.Fatalf("initialize request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
 }
 
@@ -377,29 +303,6 @@ func TestRateLimitMiddleware(t *testing.T) {
 	defer resp1.Body.Close()
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("expected first request 200, got %d", resp1.StatusCode)
-	}
-
-	resp2, err := postInitialize(srv.URL+"/mcp", nil)
-	if err != nil {
-		t.Fatalf("second request failed: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("expected second request 429, got %d", resp2.StatusCode)
-	}
-}
-
-func TestUnauthorizedRequestsAreRateLimited(t *testing.T) {
-	srv := startTestServer(newFakeSource(), Config{APIKey: "secret", RPS: 1, Burst: 1}, &ServerOptions{})
-	defer srv.Close()
-
-	resp1, err := postInitialize(srv.URL+"/mcp", nil)
-	if err != nil {
-		t.Fatalf("first request failed: %v", err)
-	}
-	defer resp1.Body.Close()
-	if resp1.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected first request 401, got %d", resp1.StatusCode)
 	}
 
 	resp2, err := postInitialize(srv.URL+"/mcp", nil)

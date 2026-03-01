@@ -82,7 +82,6 @@ type cacheClearOutput struct {
 type ServerOptions struct {
 	EnableSearch bool
 	EnableAdmin  bool
-	APIKey       string
 }
 
 type searchableSource interface {
@@ -140,7 +139,7 @@ func NewServer(source types.ProductSource, version string, opts *ServerOptions) 
 		})
 	}
 
-	if opts.EnableAdmin && strings.TrimSpace(opts.APIKey) != "" {
+	if opts.EnableAdmin {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "cache_clear",
 			Description: "Clear scraper cache (admin).",

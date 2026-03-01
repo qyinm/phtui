@@ -1,0 +1,21 @@
+{
+  "name": "@qyinm/phtui-mcp",
+  "version": "0.1.0",
+  "description": "Local stdio MCP launcher for phtui",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "phtui-mcp": "bin/phtui-mcp.mjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "keywords": [
+    "mcp",
+    "product-hunt",
+    "phtui",
+    "claude",
+    "codex",
+    "opencode"
+  ]
+}
