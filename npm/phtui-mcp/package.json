@@ -1,6 +1,6 @@
 {
   "name": "@qxinm/phtui-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local stdio MCP launcher for phtui",
   "license": "MIT",
   "repository": {
