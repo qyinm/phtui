@@ -1,6 +1,8 @@
 # phtui
 
-Product Hunt TUI - browse the Product Hunt leaderboard from your terminal.
+Product Hunt-powered inspiration layer for agents building new services.
+
+phtui turns Product Hunt launches, categories, and product details into structured idea context that agents can use for market scanning, feature inspiration, and MVP ideation.
 
 ![phtui logo](assets/logo.png)
 
@@ -16,6 +18,7 @@ Product Hunt TUI - browse the Product Hunt leaderboard from your terminal.
 - Vim-style keyboard navigation
 - Dracula color theme (16-color ANSI)
 - In-memory caching for fast navigation
+- MCP tools for agent-readable Product Hunt context and inspiration bundles
 
 ## Install
 
@@ -93,6 +96,7 @@ Core tools enabled by default (v1):
 - `product_get_detail`
 - `category_list`
 - `category_get_products`
+- `idea_inspirations`
 
 Optional tools (off by default):
 
