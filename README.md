@@ -85,7 +85,7 @@ Built with [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](ht
 
 ## MCP Server
 
-v1 is developer-friendly local mode only (stdio command). No hosted endpoint is required.
+v1 is developer-friendly local mode only. The recommended client path is the stdio command; the HTTP server is available for local development and health checks, but no hosted endpoint is required or documented as stable.
 
 Core tools enabled by default (v1):
 
@@ -106,6 +106,8 @@ One-command setup script:
 ```bash
 ./scripts/install-mcp-local.sh
 ```
+
+The `@qxinm/phtui-mcp` npm package is a lightweight launcher. It requires Go to be installed and available in `PATH`, then runs the stdio server with `go run`.
 
 Options:
 
