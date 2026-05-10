@@ -45,8 +45,41 @@ go build -o phtui .
 
 ## Usage
 
-```
+Interactive TUI:
+
+```bash
 phtui
+```
+
+Agent-friendly JSON CLI:
+
+```bash
+phtui ideas --category ai-agents --limit 5
+phtui ideas --period daily --limit 5
+phtui detail <product-slug>
+phtui leaderboard --period weekly --limit 10
+```
+
+Use the CLI when an agent needs low-token Product Hunt context without loading MCP tools.
+
+### Agent Skill
+
+This repo ships an installable agent skill for the CLI workflow:
+
+```bash
+npx skills add qyinm/phtui --skill phtui-idea-pocket
+```
+
+List available skills before installing:
+
+```bash
+npx skills add qyinm/phtui --list
+```
+
+For local development:
+
+```bash
+npx skills add . --skill phtui-idea-pocket
 ```
 
 ### Key Bindings
