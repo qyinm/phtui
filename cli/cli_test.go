@@ -77,7 +77,7 @@ func newFakeSource() *fakeSource {
 		leaderboard: []types.Product{product, product2},
 		detail:      detail1,
 		catProducts: []types.Product{product, product2},
-		catLinks:    []types.CategoryLink{
+		catLinks: []types.CategoryLink{
 			types.NewCategoryLink("AI Agents", "ai-agents"),
 			types.NewCategoryLink("Developer Tools", "developer-tools"),
 		},
