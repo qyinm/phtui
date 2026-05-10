@@ -191,4 +191,5 @@ type ProductSource interface {
 	GetLeaderboard(period Period, date time.Time) ([]Product, error)
 	GetProductDetail(slug string) (ProductDetail, error)
 	GetCategoryProducts(slug string) ([]Product, []CategoryLink, error)
+	SearchProducts(query string, page int) ([]Product, int, bool, bool, int, error)
 }

@@ -29,10 +29,20 @@ type ideasOutput struct {
 	Items        []inspirationItem `json:"items"`
 }
 
+type searchOutput struct {
+	Query      string        `json:"query"`
+	Page       int           `json:"page"`
+	HasPrev    bool          `json:"has_prev"`
+	HasNext    bool          `json:"has_next"`
+	PagesCount int           `json:"pages_count"`
+	Total      int           `json:"total"`
+	Items      []dto.Product `json:"items"`
+}
+
 // IsCommand reports whether arg is an agent-friendly non-interactive CLI command.
 func IsCommand(arg string) bool {
 	switch arg {
-	case "ideas", "detail", "leaderboard", "help", "--help", "-h":
+	case "ideas", "detail", "leaderboard", "search", "help", "--help", "-h":
 		return true
 	default:
 		return false
@@ -53,6 +63,8 @@ func Run(args []string, out io.Writer, source types.ProductSource) error {
 		return runDetail(args[1:], out, source)
 	case "leaderboard":
 		return runLeaderboard(args[1:], out, source)
+	case "search":
+		return runSearch(args[1:], out, source)
 	default:
 		writeUsage(out)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -153,6 +165,40 @@ func runLeaderboard(args []string, out io.Writer, source types.ProductSource) er
 	})
 }
 
+func runSearch(args []string, out io.Writer, source types.ProductSource) error {
+	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	fs.SetOutput(out)
+	query := fs.String("query", "", "search query")
+	page := fs.Int("page", 1, "page number (1-10)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	q := strings.TrimSpace(*query)
+	if q == "" {
+		return errors.New("--query is required")
+	}
+	p := *page
+	if p < 1 {
+		p = 1
+	}
+	if p > 10 {
+		p = 10
+	}
+	products, currentPage, hasPrev, hasNext, pagesCount, err := source.SearchProducts(q, p)
+	if err != nil {
+		return err
+	}
+	return writeJSON(out, searchOutput{
+		Query:      q,
+		Page:       currentPage,
+		HasPrev:    hasPrev,
+		HasNext:    hasNext,
+		PagesCount: pagesCount,
+		Total:      len(products),
+		Items:      dto.FromProducts(products),
+	})
+}
+
 func buildInspirationItems(products []types.Product) []inspirationItem {
 	items := make([]inspirationItem, 0, len(products))
 	for _, p := range products {
@@ -249,6 +295,7 @@ func writeUsage(out io.Writer) {
   phtui ideas --period daily|weekly|monthly [--date YYYY-MM-DD] [--limit 5]
   phtui detail <product-slug>
   phtui leaderboard --period daily|weekly|monthly [--date YYYY-MM-DD] [--limit 10]
+  phtui search --query <text> [--page 1]
 
 Run phtui without a command to open the interactive TUI.`)
 }

@@ -107,10 +107,6 @@ type ServerOptions struct {
 	EnableAdmin  bool
 }
 
-type searchableSource interface {
-	SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error)
-}
-
 type cacheClearSource interface {
 	ClearCache()
 }
@@ -399,12 +395,7 @@ func searchProductsHandler(_ context.Context, _ *mcp.CallToolRequest, args searc
 		return errorToolResult("page must be between 1 and 10"), searchProductsOutput{}, nil
 	}
 
-	searchSource, ok := source.(searchableSource)
-	if !ok {
-		return errorToolResult("search is not supported by this source"), searchProductsOutput{}, nil
-	}
-
-	products, currentPage, hasPrev, hasNext, pagesCount, err := searchSource.SearchProductsPage(query, page)
+	products, currentPage, hasPrev, hasNext, pagesCount, err := source.SearchProducts(query, page)
 	if err != nil {
 		msg := "search failed"
 		if strings.Contains(strings.ToLower(err.Error()), "cloudflare") {

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,22 +48,9 @@ func fetchProductDetail(source types.ProductSource, slug string, requestID int) 
 	}
 }
 
-type searchableSource interface {
-	SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error)
-}
-
 func fetchSearchResults(source types.ProductSource, query string, page int, requestID int) tea.Cmd {
 	return func() tea.Msg {
-		searchable, ok := source.(searchableSource)
-		if !ok {
-			return searchResultsMsg{
-				requestID: requestID,
-				query:     query,
-				page:      page,
-				err:       fmt.Errorf("search not supported by source"),
-			}
-		}
-		products, currentPage, hasPrev, hasNext, pagesCount, err := searchable.SearchProductsPage(query, page)
+		products, currentPage, hasPrev, hasNext, pagesCount, err := source.SearchProducts(query, page)
 		return searchResultsMsg{
 			requestID: requestID,
 			query:     query,

@@ -16,6 +16,7 @@ type fakeSource struct {
 	detail      types.ProductDetail
 	catProducts []types.Product
 	catLinks    []types.CategoryLink
+	search      []types.Product
 }
 
 func newFakeSource() *fakeSource {
@@ -49,6 +50,7 @@ func newFakeSource() *fakeSource {
 		),
 		catProducts: []types.Product{product},
 		catLinks:    []types.CategoryLink{types.NewCategoryLink("AI Agents", "ai-agents")},
+		search:      []types.Product{product},
 	}
 }
 
@@ -68,6 +70,10 @@ func (f *fakeSource) GetCategoryProducts(slug string) ([]types.Product, []types.
 		return nil, nil, errors.New("empty category")
 	}
 	return f.catProducts, f.catLinks, nil
+}
+
+func (f *fakeSource) SearchProducts(query string, page int) ([]types.Product, int, bool, bool, int, error) {
+	return f.search, page, page > 1, false, 1, nil
 }
 
 func TestIdeasCommandOutputsAgentFriendlyJSON(t *testing.T) {
@@ -127,5 +133,60 @@ func TestUnknownCommandReturnsUsage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "phtui ideas") {
 		t.Fatalf("expected usage, got %q", out.String())
+	}
+}
+
+func TestSearchCommandOutputsJSON(t *testing.T) {
+	var out bytes.Buffer
+	err := Run([]string{"search", "--query", "demo"}, &out, newFakeSource())
+	if err != nil {
+		t.Fatalf("run search: %v", err)
+	}
+
+	var got searchOutput
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, out.String())
+	}
+	if got.Query != "demo" {
+		t.Fatalf("unexpected query: %q", got.Query)
+	}
+	if got.Page != 1 {
+		t.Fatalf("unexpected page: %d", got.Page)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("unexpected items: %d", len(got.Items))
+	}
+	if got.Items[0].Name != "Demo Product" {
+		t.Fatalf("unexpected product name: %s", got.Items[0].Name)
+	}
+}
+
+func TestSearchCommandEmptyQueryReturnsError(t *testing.T) {
+	var out bytes.Buffer
+	err := Run([]string{"search", "--query", ""}, &out, newFakeSource())
+	if err == nil {
+		t.Fatalf("expected error for empty query")
+	}
+	if !strings.Contains(err.Error(), "--query is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchCommandPageParam(t *testing.T) {
+	var out bytes.Buffer
+	err := Run([]string{"search", "--query", "demo", "--page", "2"}, &out, newFakeSource())
+	if err != nil {
+		t.Fatalf("run search page 2: %v", err)
+	}
+
+	var got searchOutput
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if got.Page != 2 {
+		t.Fatalf("expected page 2, got %d", got.Page)
+	}
+	if !got.HasPrev {
+		t.Fatalf("expected has_prev=true for page 2")
 	}
 }

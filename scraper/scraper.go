@@ -117,8 +117,8 @@ func (s *Scraper) GetProductDetail(slug string) (types.ProductDetail, error) {
 	return detail, nil
 }
 
-// SearchProducts fetches Product Hunt global search results for the query.
-func (s *Scraper) SearchProducts(query string) ([]types.Product, error) {
+// SearchAllProducts fetches all pages of Product Hunt global search results.
+func (s *Scraper) SearchAllProducts(query string) ([]types.Product, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, nil
@@ -128,7 +128,7 @@ func (s *Scraper) SearchProducts(query string) ([]types.Product, error) {
 	seen := make(map[string]struct{})
 
 	for page := 1; page <= maxSearchPages; page++ {
-		products, _, _, hasNext, _, err := s.SearchProductsPage(q, page)
+		products, _, _, hasNext, _, err := s.SearchProducts(q, page)
 		if err != nil {
 			if page == 1 {
 				return nil, err
@@ -169,8 +169,8 @@ func (s *Scraper) SearchProducts(query string) ([]types.Product, error) {
 	return all, nil
 }
 
-// SearchProductsPage fetches a single search results page and paging metadata.
-func (s *Scraper) SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error) {
+// SearchProducts fetches a single search results page and paging metadata.
+func (s *Scraper) SearchProducts(query string, page int) ([]types.Product, int, bool, bool, int, error) {
 	if page < 1 {
 		page = 1
 	}

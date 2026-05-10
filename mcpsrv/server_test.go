@@ -87,7 +87,7 @@ func (f *fakeSource) GetCategoryProducts(slug string) ([]types.Product, []types.
 	return f.catProducts, f.catLinks, nil
 }
 
-func (f *fakeSource) SearchProductsPage(query string, page int) ([]types.Product, int, bool, bool, int, error) {
+func (f *fakeSource) SearchProducts(query string, page int) ([]types.Product, int, bool, bool, int, error) {
 	if f.failSearch {
 		return nil, page, false, false, 0, errors.New("upstream search error")
 	}
