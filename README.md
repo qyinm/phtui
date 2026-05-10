@@ -69,13 +69,19 @@ Press `4` or `Tab` to open the category selector, browse with `j`/`k`, and press
 ## Architecture
 
 ```
-types/          Core types (Product, ProductDetail, ProductSource interface)
-scraper/        HTTP scraper + HTML/SSR parser + cache
-ui/             Bubbletea TUI (model, styles, keys, commands, delegate)
-main.go         Entry point
+types/                 Core types and ProductSource interface
+scraper/               Product Hunt HTTP scraper, HTML/SSR parsers, cache
+ui/                    Bubbletea TUI model, rendering, keys, commands
+mcpsrv/                MCP tool handlers, DTO conversion, middleware, config
+cmd/phtui-mcp/         Streamable HTTP MCP server (/healthz, /mcp)
+cmd/phtui-mcp-stdio/   Local stdio MCP server for desktop agent clients
+npm/phtui-mcp/         npx launcher for the local stdio MCP server
+main.go                TUI entry point
 ```
 
-Built with [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lipgloss](https://github.com/charmbracelet/lipgloss), and [goquery](https://github.com/PuerkitoBio/goquery).
+The TUI and MCP servers share the same `types.ProductSource` abstraction, so new data-source behavior should usually be added in `scraper/` first and then exposed through `ui/` and/or `mcpsrv/`.
+
+Built with [Bubbletea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lipgloss](https://github.com/charmbracelet/lipgloss), [goquery](https://github.com/PuerkitoBio/goquery), and [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk).
 
 ## MCP Server
 
@@ -144,6 +150,21 @@ Add this to your OpenCode config (`opencode.json` / `opencode.jsonc`):
 
 ```bash
 go run ./cmd/phtui-mcp-stdio
+```
+
+### Local smoke checks
+
+Verify the MCP server exposes the default tool set:
+
+```bash
+go test ./mcpsrv -run TestMCPListTools -v
+```
+
+For the HTTP MCP server, check the health endpoint first:
+
+```bash
+go run ./cmd/phtui-mcp
+curl -fsS http://localhost:8080/healthz
 ```
 
 Environment variables:
