@@ -164,7 +164,7 @@ func (pd ProductDetail) SocialLinks() []string   { return pd.socialLinks }
 func (pd ProductDetail) LaunchDate() time.Time   { return pd.launchDate }
 func (pd ProductDetail) MakerName() string       { return pd.makerName }
 func (pd ProductDetail) MakerProfileURL() string { return pd.makerProfileURL }
-func (pd ProductDetail) ProConTags() []ProConTag  { return pd.proConTags }
+func (pd ProductDetail) ProConTags() []ProConTag { return pd.proConTags }
 func (pd ProductDetail) PricingInfo() string     { return pd.pricingInfo }
 
 type LeaderboardEntry = Product
