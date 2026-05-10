@@ -62,24 +62,87 @@ func FromProductDetail(pd types.ProductDetail) ProductDetail {
 	}
 
 	return ProductDetail{
-		Product:       FromProduct(pd.Product()),
-		Description:   pd.Description(),
-		Rating:        pd.Rating(),
-		ReviewCount:   pd.ReviewCount(),
-		FollowerCount: pd.FollowerCount(),
-		MakerComment:  pd.MakerComment(),
-		WebsiteURL:    pd.WebsiteURL(),
-		SocialLinks:   append([]string(nil), pd.SocialLinks()...),
-		MakerName:     pd.MakerName(),
-		MakerProfile:  pd.MakerProfileURL(),
-		PricingInfo:   pd.PricingInfo(),
-		PricingType:   pricingType,
-		PricingAmount: pricingAmount,
-		PricingPeriod: pricingPeriod,
-		LaunchDate:    launchDate,
-		Pros:          pros,
-		Cons:          cons,
+		Product:            FromProduct(pd.Product()),
+		Description:        pd.Description(),
+		Rating:             pd.Rating(),
+		ReviewCount:        pd.ReviewCount(),
+		FollowerCount:      pd.FollowerCount(),
+		MakerComment:       pd.MakerComment(),
+		WebsiteURL:         pd.WebsiteURL(),
+		SocialLinks:        append([]string(nil), pd.SocialLinks()...),
+		MakerName:          pd.MakerName(),
+		MakerProfile:       pd.MakerProfileURL(),
+		PricingInfo:        pd.PricingInfo(),
+		PricingType:        pricingType,
+		PricingAmount:      pricingAmount,
+		PricingPeriod:      pricingPeriod,
+		LaunchDate:         launchDate,
+		Pros:               pros,
+		Cons:               cons,
+		PositioningHint:    positioningHint(pd),
+		TargetUserSignal:   targetUserSignal(pd),
+		MonetizationSignal: monetizationSignal(pricingType, pricingAmount, pricingPeriod, pd.PricingInfo()),
+		FeatureSignals:     detailFeatureSignals(pd, pros, cons),
 	}
+}
+
+func positioningHint(pd types.ProductDetail) string {
+	if s := strings.TrimSpace(pd.Product().Tagline()); s != "" {
+		return s
+	}
+	return strings.TrimSpace(pd.Description())
+}
+
+func targetUserSignal(pd types.ProductDetail) string {
+	for _, c := range pd.Product().Categories() {
+		if s := strings.TrimSpace(c); s != "" {
+			return s + " users"
+		}
+	}
+	for _, c := range pd.Categories() {
+		if s := strings.TrimSpace(c); s != "" {
+			return s + " users"
+		}
+	}
+	return "Product Hunt users"
+}
+
+func monetizationSignal(pricingType, pricingAmount, pricingPeriod, pricingInfo string) string {
+	switch pricingType {
+	case "paid":
+		parts := []string{"paid"}
+		if pricingAmount != "" {
+			parts = append(parts, pricingAmount)
+		}
+		if pricingPeriod != "" {
+			parts[len(parts)-1] = parts[len(parts)-1] + "/" + pricingPeriod
+		}
+		return strings.Join(parts, " ")
+	case "free":
+		return "free"
+	}
+	return strings.TrimSpace(pricingInfo)
+}
+
+func detailFeatureSignals(pd types.ProductDetail, pros, cons []ProCon) []string {
+	signals := make([]string, 0, 4)
+	for _, p := range pros {
+		if strings.TrimSpace(p.Name) != "" {
+			signals = append(signals, "Positive signal: "+p.Name)
+		}
+	}
+	for _, c := range cons {
+		if strings.TrimSpace(c.Name) != "" {
+			signals = append(signals, "Constraint signal: "+c.Name)
+		}
+	}
+	if pd.Rating() > 0 {
+		signals = append(signals, "Rating signal")
+	}
+	if len(signals) == 0 && pd.Description() != "" {
+		signals = append(signals, "Description available for feature extraction")
+	}
+	return signals
 }
 
 func parsePricing(pricingInfo string) (string, string, string) {

@@ -75,6 +75,19 @@ func TestDTOJSONMarshal(t *testing.T) {
 	if got["launch_date"] != "2026-02-26" {
 		t.Fatalf("unexpected launch_date: %v", got["launch_date"])
 	}
+	if got["positioning_hint"] != "Fast demos" {
+		t.Fatalf("unexpected positioning_hint: %v", got["positioning_hint"])
+	}
+	if got["target_user_signal"] != "Developer Tools users" {
+		t.Fatalf("unexpected target_user_signal: %v", got["target_user_signal"])
+	}
+	if got["monetization_signal"] != "paid $20/month" {
+		t.Fatalf("unexpected monetization_signal: %v", got["monetization_signal"])
+	}
+	featureSignals, ok := got["feature_signals"].([]any)
+	if !ok || len(featureSignals) == 0 {
+		t.Fatalf("expected feature_signals, got %#v", got["feature_signals"])
+	}
 }
 
 func TestDTOFields(t *testing.T) {
