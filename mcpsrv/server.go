@@ -32,6 +32,13 @@ type categoryGetProductsArgs struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"Optional maximum number of products"`
 }
 
+type ideaInspirationsArgs struct {
+	CategorySlug string `json:"category_slug,omitempty" jsonschema:"Optional Product Hunt category slug to use as the inspiration source"`
+	Period       string `json:"period,omitempty" jsonschema:"Leaderboard period when category_slug is omitted: daily, weekly, monthly"`
+	Date         string `json:"date,omitempty" jsonschema:"Optional leaderboard date in YYYY-MM-DD when category_slug is omitted"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"Optional maximum number of inspiration items"`
+}
+
 type searchProductsArgs struct {
 	Query string `json:"query" jsonschema:"Search query"`
 	Page  int    `json:"page,omitempty" jsonschema:"Page number (1-10)"`
@@ -63,6 +70,22 @@ type categoryGetProductsOutput struct {
 	Total      int            `json:"total"`
 	Categories []dto.Category `json:"categories"`
 	Items      []dto.Product  `json:"items"`
+}
+
+type ideaInspirationItem struct {
+	Product           dto.Product `json:"product"`
+	InspirationReason string      `json:"inspiration_reason"`
+	FeatureSignals    []string    `json:"feature_signals"`
+	MarketSignals     []string    `json:"market_signals"`
+}
+
+type ideaInspirationsOutput struct {
+	Source       string                `json:"source"`
+	Period       string                `json:"period,omitempty"`
+	Date         string                `json:"date,omitempty"`
+	CategorySlug string                `json:"category_slug,omitempty"`
+	Total        int                   `json:"total"`
+	Items        []ideaInspirationItem `json:"items"`
 }
 
 type searchProductsOutput struct {
@@ -128,6 +151,13 @@ func NewServer(source types.ProductSource, version string, opts *ServerOptions) 
 		Description: "Get products for a category slug.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args categoryGetProductsArgs) (*mcp.CallToolResult, categoryGetProductsOutput, error) {
 		return categoryGetProductsHandler(ctx, req, args, source)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "idea_inspirations",
+		Description: "Get agent-ready inspiration items from a category or leaderboard.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args ideaInspirationsArgs) (*mcp.CallToolResult, ideaInspirationsOutput, error) {
+		return ideaInspirationsHandler(ctx, req, args, source)
 	})
 
 	if opts.EnableSearch {
@@ -261,6 +291,99 @@ func categoryGetProductsHandler(_ context.Context, _ *mcp.CallToolRequest, args 
 		Categories: dto.FromCategories(categories),
 		Items:      dto.FromProducts(products),
 	}, nil
+}
+
+func ideaInspirationsHandler(_ context.Context, _ *mcp.CallToolRequest, args ideaInspirationsArgs, source types.ProductSource) (*mcp.CallToolResult, ideaInspirationsOutput, error) {
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 25 {
+		limit = 25
+	}
+
+	categorySlug := strings.TrimSpace(args.CategorySlug)
+	if categorySlug != "" {
+		products, _, err := source.GetCategoryProducts(categorySlug)
+		if err != nil {
+			return errorToolResult("fetch category inspirations failed"), ideaInspirationsOutput{}, nil
+		}
+		products = applyLimit(products, limit)
+		return nil, ideaInspirationsOutput{
+			Source:       "category",
+			CategorySlug: categorySlug,
+			Total:        len(products),
+			Items:        buildInspirationItems(products),
+		}, nil
+	}
+
+	period, err := parsePeriod(args.Period)
+	if err != nil {
+		return errorToolResult(err.Error()), ideaInspirationsOutput{}, nil
+	}
+	date, err := parseDate(args.Date)
+	if err != nil {
+		return errorToolResult(err.Error()), ideaInspirationsOutput{}, nil
+	}
+	products, err := source.GetLeaderboard(period, date)
+	if err != nil {
+		return errorToolResult("fetch leaderboard inspirations failed"), ideaInspirationsOutput{}, nil
+	}
+	products = applyLimit(products, limit)
+	return nil, ideaInspirationsOutput{
+		Source: "leaderboard",
+		Period: period.String(),
+		Date:   date.Format(time.DateOnly),
+		Total:  len(products),
+		Items:  buildInspirationItems(products),
+	}, nil
+}
+
+func buildInspirationItems(products []types.Product) []ideaInspirationItem {
+	items := make([]ideaInspirationItem, 0, len(products))
+	for _, p := range products {
+		items = append(items, ideaInspirationItem{
+			Product:           dto.FromProduct(p),
+			InspirationReason: inspirationReason(p),
+			FeatureSignals:    featureSignals(p),
+			MarketSignals:     marketSignals(p),
+		})
+	}
+	return items
+}
+
+func inspirationReason(p types.Product) string {
+	if len(p.Categories()) > 0 {
+		return fmt.Sprintf("Rank #%d in Product Hunt context with traction in %s; useful for feature and positioning inspiration.", p.Rank(), strings.Join(p.Categories(), ", "))
+	}
+	return fmt.Sprintf("Rank #%d Product Hunt launch; useful for feature and positioning inspiration.", p.Rank())
+}
+
+func featureSignals(p types.Product) []string {
+	signals := make([]string, 0, 3)
+	if p.Tagline() != "" {
+		signals = append(signals, "Positioning: "+p.Tagline())
+	}
+	for _, c := range p.Categories() {
+		if strings.TrimSpace(c) != "" {
+			signals = append(signals, "Category pattern: "+c)
+		}
+	}
+	if len(signals) == 0 {
+		signals = append(signals, "Review product detail for feature patterns")
+	}
+	return signals
+}
+
+func marketSignals(p types.Product) []string {
+	signals := []string{fmt.Sprintf("Product Hunt rank #%d", p.Rank())}
+	if p.VoteCount() > 0 {
+		signals = append(signals, fmt.Sprintf("%d votes", p.VoteCount()))
+	}
+	if p.CommentCount() > 0 {
+		signals = append(signals, fmt.Sprintf("%d comments", p.CommentCount()))
+	}
+	return signals
 }
 
 func searchProductsHandler(_ context.Context, _ *mcp.CallToolRequest, args searchProductsArgs, source types.ProductSource) (*mcp.CallToolResult, searchProductsOutput, error) {

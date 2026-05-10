@@ -124,6 +124,35 @@ func TestToolCategoryListPaging(t *testing.T) {
 	}
 }
 
+func TestIdeaInspirationsFromCategory(t *testing.T) {
+	_, out, err := ideaInspirationsHandler(context.Background(), nil, ideaInspirationsArgs{CategorySlug: "ai-agents", Limit: 1}, newFakeSource())
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if out.Source != "category" {
+		t.Fatalf("unexpected source: %q", out.Source)
+	}
+	if out.CategorySlug != "ai-agents" {
+		t.Fatalf("unexpected category slug: %q", out.CategorySlug)
+	}
+	if len(out.Items) != 1 {
+		t.Fatalf("unexpected item count: %d", len(out.Items))
+	}
+	item := out.Items[0]
+	if item.Product.Name != "Demo Product" {
+		t.Fatalf("unexpected product: %q", item.Product.Name)
+	}
+	if item.InspirationReason == "" {
+		t.Fatalf("expected inspiration reason")
+	}
+	if len(item.FeatureSignals) == 0 {
+		t.Fatalf("expected feature signals")
+	}
+	if len(item.MarketSignals) == 0 {
+		t.Fatalf("expected market signals")
+	}
+}
+
 func TestSearchToolEmptyQuery(t *testing.T) {
 	result, _, err := searchProductsHandler(context.Background(), nil, searchProductsArgs{Query: "  "}, newFakeSource())
 	if err != nil {
@@ -377,7 +406,7 @@ func TestMCPListTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	for _, name := range []string{"leaderboard_get", "product_get_detail", "category_list", "category_get_products"} {
+	for _, name := range []string{"leaderboard_get", "product_get_detail", "category_list", "category_get_products", "idea_inspirations"} {
 		if !containsTool(tools.Tools, name) {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -397,6 +426,7 @@ func TestMCPCoreTools(t *testing.T) {
 		{Name: "product_get_detail", Arguments: map[string]any{"slug": "demo-product"}},
 		{Name: "category_list", Arguments: map[string]any{"offset": 0, "limit": 5}},
 		{Name: "category_get_products", Arguments: map[string]any{"slug": "ai-agents"}},
+		{Name: "idea_inspirations", Arguments: map[string]any{"category_slug": "ai-agents", "limit": 1}},
 	}
 
 	for _, tc := range cases {
