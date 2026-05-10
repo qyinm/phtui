@@ -21,6 +21,10 @@ type productGetDetailArgs struct {
 	Slug string `json:"slug" jsonschema:"Product slug"`
 }
 
+type productCompareArgs struct {
+	Slugs []string `json:"slugs" jsonschema:"Product slugs to compare"`
+}
+
 type categoryListArgs struct {
 	Query  string `json:"query,omitempty" jsonschema:"Optional category search query"`
 	Offset int    `json:"offset,omitempty" jsonschema:"Optional pagination offset"`
@@ -53,6 +57,11 @@ type leaderboardGetOutput struct {
 
 type productGetDetailOutput struct {
 	Item dto.ProductDetail `json:"item"`
+}
+
+type productCompareOutput struct {
+	Items   []dto.CompareItem  `json:"items"`
+	Summary dto.CompareSummary `json:"summary"`
 }
 
 type categoryListOutput struct {
@@ -136,6 +145,13 @@ func NewServer(source types.ProductSource, version string, opts *ServerOptions) 
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "product_compare",
+		Description: "Compare multiple products side-by-side by slug.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args productCompareArgs) (*mcp.CallToolResult, productCompareOutput, error) {
+		return productCompareHandler(ctx, req, args, source)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "category_list",
 		Description: "List available product categories.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args categoryListArgs) (*mcp.CallToolResult, categoryListOutput, error) {
@@ -215,6 +231,39 @@ func productGetDetailHandler(_ context.Context, _ *mcp.CallToolRequest, args pro
 	}
 
 	return nil, productGetDetailOutput{Item: dto.FromProductDetail(detail)}, nil
+}
+
+func productCompareHandler(_ context.Context, _ *mcp.CallToolRequest, args productCompareArgs, source types.ProductSource) (*mcp.CallToolResult, productCompareOutput, error) {
+	if len(args.Slugs) < 2 {
+		return errorToolResult("at least 2 slugs are required"), productCompareOutput{}, nil
+	}
+
+	details := make([]types.ProductDetail, 0, len(args.Slugs))
+	var firstErr error
+	for _, slug := range args.Slugs {
+		s := strings.TrimSpace(slug)
+		if s == "" {
+			continue
+		}
+		detail, err := source.GetProductDetail(s)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		details = append(details, detail)
+	}
+
+	if len(details) < 2 {
+		msg := "could not fetch enough product details for comparison"
+		if firstErr != nil {
+			msg = msg + ": " + firstErr.Error()
+		}
+		return errorToolResult(msg), productCompareOutput{}, nil
+	}
+
+	return nil, productCompareOutput(dto.FromCompareDetails(details)), nil
 }
 
 func categoryListHandler(_ context.Context, _ *mcp.CallToolRequest, args categoryListArgs) (*mcp.CallToolResult, categoryListOutput, error) {

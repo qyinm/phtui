@@ -28,3 +28,24 @@ type ProCon struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
+
+// CompareItem wraps a product detail with an index for side-by-side reference.
+type CompareItem struct {
+	Index int           `json:"index"`
+	Item  ProductDetail `json:"item"`
+}
+
+// CompareSummary provides cross-product comparison signals.
+type CompareSummary struct {
+	Count          int      `json:"count"`
+	RatingRange    string   `json:"rating_range,omitempty"`
+	PricingRange   string   `json:"pricing_range,omitempty"`
+	PricingTypes   []string `json:"pricing_types,omitempty"`
+	CommonCategory string   `json:"common_category,omitempty"`
+}
+
+// CompareOutput is the structured result of comparing multiple products.
+type CompareOutput struct {
+	Items   []CompareItem  `json:"items"`
+	Summary CompareSummary `json:"summary"`
+}

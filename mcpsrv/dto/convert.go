@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -84,6 +85,120 @@ func FromProductDetail(pd types.ProductDetail) ProductDetail {
 		MonetizationSignal: monetizationSignal(pricingType, pricingAmount, pricingPeriod, pd.PricingInfo()),
 		FeatureSignals:     detailFeatureSignals(pd, pros, cons),
 	}
+}
+
+func FromCompareDetails(details []types.ProductDetail) CompareOutput {
+	items := make([]CompareItem, 0, len(details))
+	for i, d := range details {
+		items = append(items, CompareItem{
+			Index: i + 1,
+			Item:  FromProductDetail(d),
+		})
+	}
+	return CompareOutput{
+		Items:   items,
+		Summary: buildCompareSummary(items),
+	}
+}
+
+func buildCompareSummary(items []CompareItem) CompareSummary {
+	summary := CompareSummary{Count: len(items)}
+	if len(items) == 0 {
+		return summary
+	}
+
+	// Rating range
+	var minRating, maxRating float64
+	hasRating := false
+	for _, item := range items {
+		r := item.Item.Rating
+		if r > 0 {
+			if !hasRating || r < minRating {
+				minRating = r
+			}
+			if !hasRating || r > maxRating {
+				maxRating = r
+			}
+			hasRating = true
+		}
+	}
+	if hasRating {
+		if minRating == maxRating {
+			summary.RatingRange = formatFloat(minRating)
+		} else {
+			summary.RatingRange = formatFloat(minRating) + "–" + formatFloat(maxRating)
+		}
+	}
+
+	// Pricing types and range
+	seenTypes := make(map[string]struct{})
+	var pricingAmounts []string
+	for _, item := range items {
+		t := item.Item.PricingType
+		if t != "" && t != "unknown" {
+			if _, ok := seenTypes[t]; !ok {
+				seenTypes[t] = struct{}{}
+				summary.PricingTypes = append(summary.PricingTypes, t)
+			}
+		}
+		if a := item.Item.PricingAmount; a != "" {
+			pricingAmounts = append(pricingAmounts, a)
+		}
+	}
+	if len(pricingAmounts) > 0 {
+		if len(pricingAmounts) == 1 {
+			summary.PricingRange = pricingAmounts[0]
+		} else {
+			minA, maxA := pricingAmounts[0], pricingAmounts[0]
+			for _, a := range pricingAmounts[1:] {
+				if len(a) < len(minA) || (len(a) == len(minA) && a < minA) {
+					minA = a
+				}
+				if len(a) > len(maxA) || (len(a) == len(maxA) && a > maxA) {
+					maxA = a
+				}
+			}
+			summary.PricingRange = minA + "–" + maxA
+		}
+	}
+
+	// Common category (most frequent)
+	catCounts := make(map[string]int)
+	for _, item := range items {
+		for _, c := range item.Item.Categories {
+			if c != "" {
+				catCounts[c]++
+			}
+		}
+	}
+	maxCount := 0
+	commonCat := ""
+	for cat, count := range catCounts {
+		if count > maxCount {
+			maxCount = count
+			commonCat = cat
+		}
+	}
+	if maxCount >= 2 && commonCat != "" {
+		summary.CommonCategory = commonCat
+	}
+
+	return summary
+}
+
+func formatFloat(f float64) string {
+	s := strings.TrimRight(strings.TrimRight(
+		strings.Replace(
+			strings.Replace(
+				strings.Replace(
+					fmt.Sprintf("%.1f", f), ".0", "", 1),
+				".", ".", 1),
+			",", ".", 1),
+		"0"), ".")
+	if s == "" {
+		s = "0"
+	}
+	return s
 }
 
 func positioningHint(pd types.ProductDetail) string {

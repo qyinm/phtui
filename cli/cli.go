@@ -42,7 +42,7 @@ type searchOutput struct {
 // IsCommand reports whether arg is an agent-friendly non-interactive CLI command.
 func IsCommand(arg string) bool {
 	switch arg {
-	case "ideas", "detail", "leaderboard", "search", "help", "--help", "-h":
+	case "ideas", "detail", "leaderboard", "search", "compare", "help", "--help", "-h":
 		return true
 	default:
 		return false
@@ -65,6 +65,8 @@ func Run(args []string, out io.Writer, source types.ProductSource) error {
 		return runLeaderboard(args[1:], out, source)
 	case "search":
 		return runSearch(args[1:], out, source)
+	case "compare":
+		return runCompare(args[1:], out, source)
 	default:
 		writeUsage(out)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -199,6 +201,45 @@ func runSearch(args []string, out io.Writer, source types.ProductSource) error {
 	})
 }
 
+func runCompare(args []string, out io.Writer, source types.ProductSource) error {
+	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
+	fs.SetOutput(out)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	slugs := fs.Args()
+	if len(slugs) < 2 {
+		return errors.New("compare requires at least 2 product slugs as positional arguments")
+	}
+
+	details := make([]types.ProductDetail, 0, len(slugs))
+	var firstErr error
+	for _, slug := range slugs {
+		s := strings.TrimSpace(slug)
+		if s == "" {
+			continue
+		}
+		detail, err := source.GetProductDetail(s)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		details = append(details, detail)
+	}
+
+	if len(details) < 2 {
+		msg := "could not fetch enough product details for comparison"
+		if firstErr != nil {
+			msg = msg + ": " + firstErr.Error()
+		}
+		return errors.New(msg)
+	}
+
+	return writeJSON(out, dto.FromCompareDetails(details))
+}
+
 func buildInspirationItems(products []types.Product) []inspirationItem {
 	items := make([]inspirationItem, 0, len(products))
 	for _, p := range products {
@@ -296,6 +337,7 @@ func writeUsage(out io.Writer) {
   phtui detail <product-slug>
   phtui leaderboard --period daily|weekly|monthly [--date YYYY-MM-DD] [--limit 10]
   phtui search --query <text> [--page 1]
+  phtui compare <slug1> <slug2> [<slug3> ...]
 
 Run phtui without a command to open the interactive TUI.`)
 }

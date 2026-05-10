@@ -25,6 +25,7 @@ type fakeSource struct {
 	failDetail  bool
 	failCat     bool
 	failSearch  bool
+	slugDetail  map[string]types.ProductDetail // per-slug detail for compare
 }
 
 func newFakeSource() *fakeSource {
@@ -38,9 +39,19 @@ func newFakeSource() *fakeSource {
 		"https://img.example/demo.png",
 		1,
 	)
-	detail := types.NewProductDetail(
+	product2 := types.NewProduct(
+		"Second Product",
+		"Another tagline",
+		[]string{"AI Agents", "Developer Tools"},
+		88,
+		3,
+		"second-product",
+		"https://img.example/second.png",
+		2,
+	)
+	detail1 := types.NewProductDetail(
 		product,
-		"Description",
+		"Description one",
 		4.5,
 		8,
 		20,
@@ -49,20 +60,40 @@ func newFakeSource() *fakeSource {
 		[]string{"AI Agents"},
 		[]string{"https://x.com/demo"},
 		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-		"Maker",
-		"https://producthunt.com/@maker",
-		nil,
+		"Maker One",
+		"https://producthunt.com/@maker1",
+		[]types.ProConTag{types.NewProConTag("Fast", "Positive", 3)},
 		"$9/month",
 	)
+	detail2 := types.NewProductDetail(
+		product2,
+		"Description two",
+		4.2,
+		5,
+		15,
+		"Another comment",
+		"https://second.example",
+		[]string{"AI Agents", "Developer Tools"},
+		[]string{"https://x.com/second"},
+		time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		"Maker Two",
+		"https://producthunt.com/@maker2",
+		[]types.ProConTag{types.NewProConTag("Cheap", "Positive", 5)},
+		"Free",
+	)
 	return &fakeSource{
-		leaderboard: []types.Product{product},
-		detail:      detail,
-		catProducts: []types.Product{product},
+		leaderboard: []types.Product{product, product2},
+		detail:      detail1,
+		catProducts: []types.Product{product, product2},
 		catLinks: []types.CategoryLink{
 			types.NewCategoryLink("AI Agents", "ai-agents"),
 			types.NewCategoryLink("Developer Tools", "developer-tools"),
 		},
-		search: []types.Product{product},
+		search: []types.Product{product, product2},
+		slugDetail: map[string]types.ProductDetail{
+			"demo-product":   detail1,
+			"second-product": detail2,
+		},
 	}
 }
 
@@ -76,6 +107,9 @@ func (f *fakeSource) GetLeaderboard(period types.Period, date time.Time) ([]type
 func (f *fakeSource) GetProductDetail(slug string) (types.ProductDetail, error) {
 	if f.failDetail {
 		return types.ProductDetail{}, errors.New("upstream detail error")
+	}
+	if d, ok := f.slugDetail[slug]; ok {
+		return d, nil
 	}
 	return f.detail, nil
 }
@@ -406,7 +440,7 @@ func TestMCPListTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	for _, name := range []string{"leaderboard_get", "product_get_detail", "category_list", "category_get_products", "idea_inspirations"} {
+	for _, name := range []string{"leaderboard_get", "product_get_detail", "category_list", "category_get_products", "idea_inspirations", "product_compare"} {
 		if !containsTool(tools.Tools, name) {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -427,6 +461,7 @@ func TestMCPCoreTools(t *testing.T) {
 		{Name: "category_list", Arguments: map[string]any{"offset": 0, "limit": 5}},
 		{Name: "category_get_products", Arguments: map[string]any{"slug": "ai-agents"}},
 		{Name: "idea_inspirations", Arguments: map[string]any{"category_slug": "ai-agents", "limit": 1}},
+		{Name: "product_compare", Arguments: map[string]any{"slugs": []string{"demo-product", "second-product"}}},
 	}
 
 	for _, tc := range cases {
@@ -454,6 +489,43 @@ func TestSearchToolSuccess(t *testing.T) {
 	}
 	if result.IsError {
 		t.Fatalf("search tool returned IsError=true")
+	}
+}
+
+func TestProductCompareSuccess(t *testing.T) {
+	ctx := context.Background()
+	srv := startTestServer(newFakeSource(), Config{}, &ServerOptions{})
+	defer srv.Close()
+
+	session := connectTestClient(t, ctx, srv.URL+"/mcp")
+	defer session.Close()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "product_compare", Arguments: map[string]any{"slugs": []string{"demo-product", "second-product"}}})
+	if err != nil {
+		t.Fatalf("compare tool call failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("compare tool returned IsError=true")
+	}
+	if result.Content == nil || len(result.Content) == 0 {
+		t.Fatalf("compare tool returned empty content")
+	}
+}
+
+func TestProductCompareTooFewSlugs(t *testing.T) {
+	ctx := context.Background()
+	srv := startTestServer(newFakeSource(), Config{}, &ServerOptions{})
+	defer srv.Close()
+
+	session := connectTestClient(t, ctx, srv.URL+"/mcp")
+	defer session.Close()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "product_compare", Arguments: map[string]any{"slugs": []string{"only-one"}}})
+	if err != nil {
+		t.Fatalf("compare tool call: %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("expected IsError for <2 slugs")
 	}
 }
 
