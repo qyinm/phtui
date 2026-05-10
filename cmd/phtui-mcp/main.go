@@ -26,8 +26,7 @@ func main() {
 	cfg := mcpsrv.LoadConfig()
 	source := scraper.New()
 	server := mcpsrv.NewServer(source, "dev", &mcpsrv.ServerOptions{
-		EnableSearch: cfg.EnableSearch,
-		EnableAdmin:  cfg.EnableAdmin,
+		EnableAdmin: cfg.EnableAdmin,
 	})
 
 	mux := http.NewServeMux()

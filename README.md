@@ -130,10 +130,11 @@ Core tools enabled by default (v1):
 - `category_list`
 - `category_get_products`
 - `idea_inspirations`
+- `search_products`
+- `product_compare`
 
 Optional tools (off by default):
 
-- `search_products` (`PHTUI_MCP_ENABLE_SEARCH=true`)
 - `cache_clear` (`PHTUI_MCP_ENABLE_ADMIN=true`)
 
 Local client setup examples:
@@ -210,7 +211,6 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PHTUI_MCP_ENABLE_SEARCH` | `false` | Enable `search_products` tool |
 | `PHTUI_MCP_ENABLE_ADMIN` | `false` | Enable admin tool `cache_clear` |
 | `PHTUI_MCP_CACHE_CLEAR_INTERVAL` | `30m` | Periodic scraper cache clear; `0` disables |
 

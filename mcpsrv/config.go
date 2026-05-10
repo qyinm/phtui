@@ -13,7 +13,6 @@ type Config struct {
 	Port               string
 	AllowedOrigins     []string
 	Stateless          bool
-	EnableSearch       bool
 	EnableAdmin        bool
 	RPS                float64
 	Burst              int
@@ -31,7 +30,6 @@ func LoadConfig() Config {
 		Port:               port,
 		AllowedOrigins:     parseCSV(os.Getenv("PHTUI_MCP_ALLOWED_ORIGINS")),
 		Stateless:          parseBool(os.Getenv("PHTUI_MCP_STATELESS"), false),
-		EnableSearch:       parseBool(os.Getenv("PHTUI_MCP_ENABLE_SEARCH"), false),
 		EnableAdmin:        parseBool(os.Getenv("PHTUI_MCP_ENABLE_ADMIN"), false),
 		RPS:                parseFloat(os.Getenv("PHTUI_MCP_RPS"), 2),
 		Burst:              parseInt(os.Getenv("PHTUI_MCP_BURST"), 5),

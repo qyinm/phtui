@@ -112,8 +112,7 @@ type cacheClearOutput struct {
 }
 
 type ServerOptions struct {
-	EnableSearch bool
-	EnableAdmin  bool
+	EnableAdmin bool
 }
 
 type cacheClearSource interface {
@@ -172,14 +171,12 @@ func NewServer(source types.ProductSource, version string, opts *ServerOptions) 
 		return ideaInspirationsHandler(ctx, req, args, source)
 	})
 
-	if opts.EnableSearch {
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "search_products",
-			Description: "Search products by query.",
-		}, func(ctx context.Context, req *mcp.CallToolRequest, args searchProductsArgs) (*mcp.CallToolResult, searchProductsOutput, error) {
-			return searchProductsHandler(ctx, req, args, source)
-		})
-	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "search_products",
+		Description: "Search products by query.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args searchProductsArgs) (*mcp.CallToolResult, searchProductsOutput, error) {
+		return searchProductsHandler(ctx, req, args, source)
+	})
 
 	if opts.EnableAdmin {
 		mcp.AddTool(server, &mcp.Tool{

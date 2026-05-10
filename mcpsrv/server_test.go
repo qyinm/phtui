@@ -228,30 +228,19 @@ func TestToolUpstreamFailuresIsError(t *testing.T) {
 }
 
 func TestSearchToolGating(t *testing.T) {
+	// search_products is always enabled (no longer gated by EnableSearch)
 	ctx := context.Background()
-	srvWithout := startTestServer(newFakeSource(), Config{}, &ServerOptions{EnableSearch: false})
-	defer srvWithout.Close()
+	srv := startTestServer(newFakeSource(), Config{}, &ServerOptions{})
+	defer srv.Close()
 
-	sessionWithout := connectTestClient(t, ctx, srvWithout.URL+"/mcp")
-	toolsWithout, err := sessionWithout.ListTools(ctx, nil)
+	session := connectTestClient(t, ctx, srv.URL+"/mcp")
+	tools, err := session.ListTools(ctx, nil)
 	if err != nil {
-		t.Fatalf("list tools (without search): %v", err)
+		t.Fatalf("list tools: %v", err)
 	}
-	sessionWithout.Close()
-	if containsTool(toolsWithout.Tools, "search_products") {
-		t.Fatalf("search_products should be absent when disabled")
-	}
-
-	srvWith := startTestServer(newFakeSource(), Config{}, &ServerOptions{EnableSearch: true})
-	defer srvWith.Close()
-	sessionWith := connectTestClient(t, ctx, srvWith.URL+"/mcp")
-	toolsWith, err := sessionWith.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatalf("list tools (with search): %v", err)
-	}
-	sessionWith.Close()
-	if !containsTool(toolsWith.Tools, "search_products") {
-		t.Fatalf("search_products should be present when enabled")
+	session.Close()
+	if !containsTool(tools.Tools, "search_products") {
+		t.Fatalf("search_products should always be present")
 	}
 }
 
@@ -477,7 +466,7 @@ func TestMCPCoreTools(t *testing.T) {
 
 func TestSearchToolSuccess(t *testing.T) {
 	ctx := context.Background()
-	srv := startTestServer(newFakeSource(), Config{}, &ServerOptions{EnableSearch: true})
+	srv := startTestServer(newFakeSource(), Config{}, &ServerOptions{})
 	defer srv.Close()
 
 	session := connectTestClient(t, ctx, srv.URL+"/mcp")
